@@ -537,6 +537,14 @@ void audio_receiver_set_anchor_time(uint64_t clock_id, uint64_t network_time_ns,
 
 void audio_receiver_set_playing(bool playing) {
   audio_timing_set_playing(&receiver.timing, playing);
+  // Where playback actually is, read before pausing the scheduler.
+  bool cursor_valid = false;
+  uint32_t cursor_rtp = 0;
+  if (receiver.engine_v2_ready &&
+      receiver.engine_v2.scheduler.state == AUDIO_SCHED_PLAYING) {
+    cursor_rtp = receiver.engine_v2.scheduler.cursor_rtp;
+    cursor_valid = true;
+  }
   if (receiver.engine_v2_ready) {
     audio_engine_v2_set_playing(&receiver.engine_v2, playing);
   }
@@ -550,7 +558,19 @@ void audio_receiver_set_playing(bool playing) {
     // overshoots by the pause duration and fires a false seek flush on any
     // pause >= seek_threshold (5 s) — causing up to 7+ s of silence when
     // pre-buffered frames end up far ahead of the unwanted new anchor.
-    if (receiver.timing.anchor_valid && receiver.stream) {
+    //
+    // The scheduler's render cursor is the true position.  The wall-clock
+    // estimate below assumes playback runs from the moment the anchor
+    // arrived, and has been seen 5.7 s ahead of the phone's own resume
+    // point -- past the threshold, so the resume flushed the buffer the phone
+    // would not resend and stalled for ~5 s.  It is only the fallback now,
+    // for a pause that lands before playback started.
+    if (cursor_valid) {
+      receiver.paused_rtp = cursor_rtp;
+      receiver.paused_rtp_valid = true;
+      ESP_LOGD(TAG, "Pause: RTP snapshot=%lu (render cursor)",
+               (unsigned long)receiver.paused_rtp);
+    } else if (receiver.timing.anchor_valid && receiver.stream) {
       int sample_rate = receiver.stream->format.sample_rate;
       if (sample_rate <= 0) {
         sample_rate = 44100;
