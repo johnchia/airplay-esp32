@@ -128,12 +128,14 @@ typedef struct audio_receiver_state {
   // seek: flush empties buffer before anchor arrives, so seek detection in
   // set_anchor_time would otherwise find no oldest_rtp and skip arming).
   bool arm_gate_on_next_anchor;
-  // Set by audio_receiver_seek_flush() to reject ALL incoming frames until
-  // the next SETRATEANCHORTIME provides a valid anchor.  Without this, stale
-  // TCP data (from the old track still draining the socket buffer) fills the
-  // ring buffer between FLUSHBUFFERED and the anchor, causing a second flush
-  // and doubling the startup delay.
-  bool discard_all_until_anchor;
+  // Set by audio_receiver_seek_flush(): after an immediate FLUSHBUFFERED an
+  // iPhone first drains several seconds of the old position from its own send
+  // queue, then starts the new position.  The backlog carries on the RTP
+  // sequence from the last frame before the flush, so it is dropped frame by
+  // frame until the sequence breaks, before it is decrypted or decoded.
+  bool seek_backlog_valid;
+  uint32_t seek_backlog_next_rtp;
+  uint32_t seek_backlog_dropped;
 
   // Snapshot of the expected RTP position taken the moment the sender signals
   // PAUSE (SETRATEANCHORTIME rate=0).  Path B in audio_receiver_set_anchor_time

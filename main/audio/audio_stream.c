@@ -62,12 +62,24 @@ bool audio_stream_accept_timestamp(audio_receiver_state_t *state,
     return false;
   }
 
-  // Blanket gate: reject everything between seek_flush and the next anchor.
-  // Deliberately checked before decrypt/decode in the buffered TCP task so
-  // old-track backlog is drained from the socket without decoder CPU or PCM
-  // ring use.
-  if (state->discard_all_until_anchor) {
-    return false;
+  // Old-position backlog after an immediate FLUSHBUFFERED: frames that carry
+  // on the RTP sequence from before the flush.  The first break in the
+  // sequence is the new position, and ends the gate.  Two frames of slack
+  // cover the frame the reader was on when the flush landed.
+  if (state->seek_backlog_valid) {
+    const uint32_t frame_samples = state->engine_v2.timeline.frame_samples;
+    const int32_t delta = (int32_t)(timestamp - state->seek_backlog_next_rtp);
+    if (delta >= -2 * (int32_t)frame_samples &&
+        delta <= 2 * (int32_t)frame_samples) {
+      state->seek_backlog_next_rtp = timestamp + frame_samples;
+      state->seek_backlog_dropped++;
+      return false;
+    }
+    state->seek_backlog_valid = false;
+    ESP_LOGI(TAG,
+             "Seek: new audio from rtp=%" PRIu32 " after %" PRIu32
+             " backlog frames (step %" PRId32 ")",
+             timestamp, state->seek_backlog_dropped, delta);
   }
 
   // Post-seek RTP window gate: discard frames outside [discard_before_rtp,
@@ -101,9 +113,6 @@ bool audio_stream_accept_timestamp(audio_receiver_state_t *state,
 // whether the frame must be dropped.
 static bool timestamp_is_gated(const audio_receiver_state_t *state,
                                uint32_t timestamp) {
-  if (state->discard_all_until_anchor) {
-    return true;
-  }
   if (state->discard_before_rtp_valid &&
       (int32_t)(timestamp - state->discard_before_rtp) < 0) {
     return true;
@@ -174,9 +183,9 @@ bool audio_stream_process_accepted_frame(audio_receiver_state_t *state,
                            decode_buffer, (size_t)decoded_samples, channels);
 
   // Re-check the gates after decode.  A concurrent seek/anchor flush (RTSP
-  // task) can set discard_all_until_anchor OR arm the RTP window gates
-  // (discard_before_rtp / discard_above_rtp, Path B) and flush the ring while
-  // this frame was being decrypted/decoded.  Use the read-only predicate so a
+  // task) can arm the RTP window gates (discard_before_rtp /
+  // discard_above_rtp, Path B) and flush the ring while this frame was being
+  // decrypted/decoded.  Use the read-only predicate so a
   // stale mid-flight frame is dropped without disarming a gate a concurrent
   // seek just armed (which would let later backlog through).
   if (timestamp_is_gated(state, timestamp)) {

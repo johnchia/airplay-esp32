@@ -389,19 +389,18 @@ void audio_receiver_set_anchor_time(uint64_t clock_id, uint64_t network_time_ns,
   const uint32_t gate_window = (uint32_t)(10 * sample_rate);
   const int32_t seek_threshold = 5 * sample_rate;
 
-  // --- Phase 1: Arm RTP gates BEFORE opening the blanket gate -----------
+  // --- Phase 1: Arm the RTP gates ----------------------------------------
   //
-  // The blanket gate (discard_all_until_anchor) blocks ALL frames from the
-  // TCP task.  The per-RTP gates filter by timestamp range.  On single-core
-  // ESP32-S2, ESP_LOGI can yield to the scheduler, so any gap between
-  // clearing the blanket and arming the per-RTP gates lets the TCP task
-  // queue stale frames.  Arm first, then open.
+  // The per-RTP gates filter by timestamp range.  They are armed before
+  // anything else here: on single-core ESP32-S2, ESP_LOGI can yield to the
+  // scheduler, and the TCP task must not queue stale frames in that gap.
   bool gates_armed = false;
 
   // Path A: seek_flush set arm_gate_on_next_anchor because the buffer was
   // already empty when the flush happened (forward-seek).
   if (receiver.arm_gate_on_next_anchor) {
     receiver.arm_gate_on_next_anchor = false;
+    receiver.seek_backlog_valid = false;
     receiver.discard_before_rtp = rtp_time;
     receiver.discard_before_rtp_valid = true;
     receiver.discard_above_rtp = rtp_time + gate_window;
@@ -410,6 +409,21 @@ void audio_receiver_set_anchor_time(uint64_t clock_id, uint64_t network_time_ns,
     ESP_LOGI(TAG,
              "RTP gates armed on anchor: discard_before=%lu discard_above=%lu",
              (unsigned long)rtp_time, (unsigned long)(rtp_time + gate_window));
+    // What arrived between the flush and this anchor was kept: an iPhone
+    // streams the new position for seconds before it sends the anchor, and
+    // rejecting it all left the start waiting for the clock to reach the
+    // first frame kept, 6-9 s of silence after a seek.  Blocks before the
+    // anchor are of no use.  Blocks past the window are not stale: the phone
+    // fills far beyond 10 s, and dropping them cut a hole into the fill.
+    if (receiver.engine_v2_ready) {
+      audio_timeline_t *timeline = &receiver.engine_v2.timeline;
+      const uint32_t epoch = audio_epoch_get(&receiver.engine_v2.epoch);
+      const size_t stale =
+          audio_timeline_trim_before(timeline, epoch, rtp_time);
+      if (stale > 0U) {
+        ESP_LOGI(TAG, "Dropped %u blocks before the anchor", (unsigned)stale);
+      }
+    }
   }
 
   // Path B: Anchor-change detection — the phone changed track with a
@@ -488,9 +502,6 @@ void audio_receiver_set_anchor_time(uint64_t clock_id, uint64_t network_time_ns,
                (long)delta, (float)delta / (float)sample_rate);
     }
   }
-
-  // NOW safe to clear the blanket gate — per-RTP gates are active.
-  receiver.discard_all_until_anchor = false;
 
   // A second pass used to re-check the sorted buffer's oldest frame here,
   // because a frame queued before seek_flush could still be sitting below the
@@ -778,6 +789,7 @@ void audio_receiver_stop(void) {
   memset(&receiver.client_control_addr, 0,
          sizeof(receiver.client_control_addr));
   audio_receiver_reset_resend_state();
+  receiver.seek_backlog_valid = false;
 
   audio_receiver_flush();
 }
@@ -832,7 +844,6 @@ void audio_receiver_flush(void) {
   receiver.discard_before_rtp_valid = false;
   receiver.discard_above_rtp_valid = false;
   receiver.arm_gate_on_next_anchor = false;
-  receiver.discard_all_until_anchor = false;
   receiver.paused_rtp_valid = false;
   receiver.blocks_read_in_sequence = 1;
 }
@@ -842,16 +853,26 @@ void audio_receiver_seek_flush(void) {
   // audio_receiver_flush(); the timeline re-prerolls from the new anchor by
   // itself.  Also disarms any pending deferred flush (audio_timing_reset
   // clears it).
+  //
+  // What arrives before that anchor is kept.  An iPhone streams the new
+  // position's audio straight after FLUSHBUFFERED and sends the anchor 2-3 s
+  // later; a blanket gate here threw those seconds away, and the start then
+  // waited for the clock to reach the first frame kept.  Only the old
+  // position's backlog is dropped: it carries on the RTP sequence from the
+  // last frame before the flush.  That gate is armed before the flush.  Armed
+  // after it, the reader slipped a backlog frame into the new epoch between
+  // the two, and as the timeline's first block it fixed the RTP phase, so the
+  // new position's frames were phase-blocked and the decoder stalled.
+  receiver.seek_backlog_next_rtp =
+      receiver.stats.last_timestamp + receiver.engine_v2.timeline.frame_samples;
+  receiver.seek_backlog_dropped = 0;
+  receiver.seek_backlog_valid = receiver.engine_v2_ready;
   audio_receiver_flush();
   // Request that the RTP gate be armed as soon as the next anchor arrives.
   // This covers the forward-seek case where the buffer is already empty by
   // the time SETRATEANCHORTIME arrives, so the seek-detection heuristic
   // (which needs oldest_rtp from the buffer) would otherwise miss arming it.
   receiver.arm_gate_on_next_anchor = true;
-  // Reject ALL incoming frames until the next anchor.  Prevents stale TCP
-  // data from filling the buffer between FLUSHBUFFERED and SETRATEANCHORTIME,
-  // which would cause a second flush and double the startup delay.
-  receiver.discard_all_until_anchor = true;
 }
 
 void audio_receiver_realtime_flush(bool until_valid, uint32_t until_rtp) {
@@ -860,6 +881,7 @@ void audio_receiver_realtime_flush(bool until_valid, uint32_t until_rtp) {
     return;
   }
   audio_receiver_flush();
+  receiver.seek_backlog_valid = false;
   // A realtime sender streams the new audio over UDP straight after FLUSH,
   // and macOS sends its next anchor ~1.6 s later.  The blanket gate of a
   // buffered seek flush threw all of that away, and the start then waited
