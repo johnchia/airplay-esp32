@@ -535,62 +535,58 @@ void audio_receiver_set_anchor_time(uint64_t clock_id, uint64_t network_time_ns,
   }
 }
 
-void audio_receiver_set_playing(bool playing) {
-  audio_timing_set_playing(&receiver.timing, playing);
-  // Where playback actually is, read before pausing the scheduler.
-  bool cursor_valid = false;
-  uint32_t cursor_rtp = 0;
+// Snapshot the RTP position at the moment of pause so that Path B in
+// audio_receiver_set_anchor_time() can compare the next resume anchor against
+// the actual pause position.  Call it before pausing the scheduler.
+//
+// Without it, Path B uses (anchor_rtp + wall_clock_elapsed), which overshoots
+// by the pause duration and fires a false seek flush on any pause >=
+// seek_threshold (5 s) -- the flush drops the buffer the phone will not
+// resend, and the resume stalls ~5 s before a fallback start.
+//
+// The scheduler's render cursor is the true position.  The wall-clock
+// estimate assumes playback has run from the moment the anchor arrived, and
+// is only the fallback, for a pause that lands before playback started.
+static void snapshot_pause_position(void) {
   if (receiver.engine_v2_ready &&
       receiver.engine_v2.scheduler.state == AUDIO_SCHED_PLAYING) {
-    cursor_rtp = receiver.engine_v2.scheduler.cursor_rtp;
-    cursor_valid = true;
+    receiver.paused_rtp = receiver.engine_v2.scheduler.cursor_rtp;
+    receiver.paused_rtp_valid = true;
+    ESP_LOGD(TAG, "Pause: RTP snapshot=%lu (render cursor)",
+             (unsigned long)receiver.paused_rtp);
+  } else if (receiver.timing.anchor_valid && receiver.stream) {
+    int sample_rate = receiver.stream->format.sample_rate;
+    if (sample_rate <= 0) {
+      sample_rate = 44100;
+    }
+    int64_t elapsed_us =
+        esp_timer_get_time() - (receiver.timing.anchor_local_time_ns / 1000LL);
+    if (elapsed_us < 0) {
+      elapsed_us = 0;
+    }
+    if (elapsed_us > 600000000LL) {
+      elapsed_us = 600000000LL;
+    }
+    int32_t elapsed_samples =
+        (int32_t)((elapsed_us * (int64_t)sample_rate) / 1000000LL);
+    receiver.paused_rtp =
+        receiver.timing.anchor_rtp_time + (uint32_t)elapsed_samples;
+    receiver.paused_rtp_valid = true;
+    ESP_LOGD(TAG, "Pause: RTP snapshot=%lu (elapsed=%.2f s)",
+             (unsigned long)receiver.paused_rtp, (float)elapsed_us / 1e6f);
+  }
+}
+
+void audio_receiver_set_playing(bool playing) {
+  audio_timing_set_playing(&receiver.timing, playing);
+  if (!playing) {
+    snapshot_pause_position();
   }
   if (receiver.engine_v2_ready) {
     audio_engine_v2_set_playing(&receiver.engine_v2, playing);
   }
   if (!playing) {
     receiver.blocks_read_in_sequence = 0;
-    // Snapshot the expected RTP position at the moment of pause so that
-    // Path B in audio_receiver_set_anchor_time() can compare the next
-    // resume anchor against the actual pause position.
-    //
-    // Without this, Path B uses (anchor_rtp + wall_clock_elapsed), which
-    // overshoots by the pause duration and fires a false seek flush on any
-    // pause >= seek_threshold (5 s) — causing up to 7+ s of silence when
-    // pre-buffered frames end up far ahead of the unwanted new anchor.
-    //
-    // The scheduler's render cursor is the true position.  The wall-clock
-    // estimate below assumes playback runs from the moment the anchor
-    // arrived, and has been seen 5.7 s ahead of the phone's own resume
-    // point -- past the threshold, so the resume flushed the buffer the phone
-    // would not resend and stalled for ~5 s.  It is only the fallback now,
-    // for a pause that lands before playback started.
-    if (cursor_valid) {
-      receiver.paused_rtp = cursor_rtp;
-      receiver.paused_rtp_valid = true;
-      ESP_LOGD(TAG, "Pause: RTP snapshot=%lu (render cursor)",
-               (unsigned long)receiver.paused_rtp);
-    } else if (receiver.timing.anchor_valid && receiver.stream) {
-      int sample_rate = receiver.stream->format.sample_rate;
-      if (sample_rate <= 0) {
-        sample_rate = 44100;
-      }
-      int64_t elapsed_us = esp_timer_get_time() -
-                           (receiver.timing.anchor_local_time_ns / 1000LL);
-      if (elapsed_us < 0) {
-        elapsed_us = 0;
-      }
-      if (elapsed_us > 600000000LL) {
-        elapsed_us = 600000000LL;
-      }
-      int32_t elapsed_samples =
-          (int32_t)((elapsed_us * (int64_t)sample_rate) / 1000000LL);
-      receiver.paused_rtp =
-          receiver.timing.anchor_rtp_time + (uint32_t)elapsed_samples;
-      receiver.paused_rtp_valid = true;
-      ESP_LOGD(TAG, "Pause: RTP snapshot=%lu (elapsed=%.2f s)",
-               (unsigned long)receiver.paused_rtp, (float)elapsed_us / 1e6f);
-    }
   }
 }
 
@@ -876,6 +872,7 @@ void audio_receiver_pause(void) {
   // SETRATEANCHORTIME anchor that re-aligns the buffered frames to the
   // correct wall-clock position; no flush or offset compensation is needed.
   audio_timing_set_playing(&receiver.timing, false);
+  snapshot_pause_position();
   if (receiver.engine_v2_ready) {
     audio_engine_v2_set_playing(&receiver.engine_v2, false);
   }
