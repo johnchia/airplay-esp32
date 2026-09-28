@@ -853,6 +853,25 @@ void audio_receiver_seek_flush(void) {
   receiver.discard_all_until_anchor = true;
 }
 
+void audio_receiver_realtime_flush(bool until_valid, uint32_t until_rtp) {
+  if (receiver.stream != receiver.realtime_stream) {
+    audio_receiver_seek_flush();
+    return;
+  }
+  audio_receiver_flush();
+  // A realtime sender streams the new audio over UDP straight after FLUSH,
+  // and macOS sends its next anchor ~1.6 s later.  The blanket gate of a
+  // buffered seek flush threw all of that away, and the start then waited
+  // for the play position to reach the first packet it kept.  No old-track
+  // backlog queues behind a UDP socket the way it does behind the buffered
+  // TCP one: what is stale is from before the flush point, and below it.
+  if (until_valid) {
+    receiver.discard_before_rtp = until_rtp;
+    receiver.discard_before_rtp_valid = true;
+  }
+  receiver.arm_gate_on_next_anchor = true;
+}
+
 void audio_receiver_set_deferred_flush(uint32_t flush_until_ts) {
   if (!receiver.stream) {
     return;
