@@ -59,6 +59,8 @@ typedef struct audio_receiver_state {
   uint32_t aac_diag_epoch;
   uint32_t aac_diag_last_rtp;
   bool aac_diag_rtp_valid;
+  // Buffered frames still to be silenced after a break in the RTP sequence.
+  uint8_t aac_prime_left;
 
   // Last SETRATEANCHORTIME, kept in the sender's PTP domain so it can be
   // re-armed once the PTP clock locks.  An anchor that arrives while the

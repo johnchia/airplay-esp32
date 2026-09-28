@@ -185,6 +185,7 @@ static void audio_receiver_reset_engine_v2(void) {
   audio_decode_worker_discard_pending(receiver.decode_worker);
   (void)audio_engine_v2_begin_epoch(&receiver.engine_v2, esp_timer_get_time());
   receiver.aac_diag_rtp_valid = false;
+  receiver.aac_prime_left = 0;
   receiver.engine_v2_anchor_pending = false;
 }
 
