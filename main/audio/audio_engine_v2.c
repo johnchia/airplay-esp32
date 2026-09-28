@@ -336,6 +336,28 @@ bool audio_engine_v2_push_pcm_wait(audio_engine_v2_t *engine, uint32_t epoch,
       esp_timer_get_time() + (int64_t)timeout_ms * 1000LL;
 
   while (audio_epoch_matches(&engine->epoch, epoch)) {
+    /* A block of another RTP phase while nothing is scheduled cannot be a
+     * gapless transition waiting for the outgoing audio to drain: there is
+     * no outgoing audio.  A block or two of the wrong phase got in ahead of a
+     * new stream (a seek's backlog frame, say) and fixed the phase, so they
+     * go, or the new stream never gets in and the sender stalls behind it.
+     * A whole buffered stream of the other phase means this block is the odd
+     * one out, and it is dropped instead. */
+    if (audio_timeline_phase_blocked(&engine->timeline, epoch, first_rtp) &&
+        (engine->scheduler.state == AUDIO_SCHED_WAIT_ANCHOR ||
+         engine->scheduler.state == AUDIO_SCHED_IDLE)) {
+      const size_t held = audio_timeline_count(&engine->timeline);
+      if (held > 8U) {
+        ESP_LOGW(TAG,
+                 "Dropping rtp=%" PRIu32
+                 ": another phase than the %u blocks held",
+                 first_rtp, (unsigned)held);
+        return false;
+      }
+      ESP_LOGW(TAG, "Dropping %u blocks of another phase ahead of rtp=%" PRIu32,
+               (unsigned)held, first_rtp);
+      audio_timeline_clear(&engine->timeline);
+    }
     if (!audio_timeline_phase_blocked(&engine->timeline, epoch, first_rtp) &&
         audio_timeline_free_slots(&engine->timeline) > 0U) {
       return audio_engine_v2_push_pcm(engine, epoch, first_rtp, pcm, samples,
