@@ -764,6 +764,9 @@ void audio_receiver_stop(void) {
 
   // Stop the decode worker before the decoder it uses goes away.  The engine
   // itself is kept: the playback task renders from it on every I2S refill.
+  // A new epoch first: the worker may be waiting on a full timeline that a
+  // paused scheduler will never drain, and only an epoch change ends that.
+  audio_receiver_reset_engine_v2();
   audio_decode_worker_destroy(receiver.decode_worker);
   receiver.decode_worker = NULL;
 
