@@ -223,7 +223,7 @@ scripts/lint.sh            # Run clang-tidy on all C/H files
 scripts/lint.sh --fix      # Attempt to auto-fix clang-tidy issues
 ```
 
-**Host tests**: `tests/pcm51xx/run.py`, `tests/audio_eq/run.py` and `tests/ptp_clock/run.py` compile the real driver, EQ and PTP filter code against small mocks with the host C compiler, and run in CI's `format-check` job. There is no test framework beyond that; everything else needs testing on hardware.
+**Host tests**: `tests/pcm51xx/run.py`, `tests/audio_eq/run.py`, `tests/ptp_clock/run.py` and `tests/audio_scheduler/run.py` compile the real driver, EQ, PTP filter and scheduler code against small mocks with the host C compiler, and run in CI's `format-check` job. There is no test framework beyond that; everything else needs testing on hardware.
 
 ## Documentation site
 
