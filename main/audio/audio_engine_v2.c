@@ -229,6 +229,17 @@ bool audio_engine_v2_is_nearly_full(audio_engine_v2_t *engine) {
          audio_timeline_is_nearly_full(&engine->timeline);
 }
 
+bool audio_engine_v2_play_cursor(const audio_engine_v2_t *engine,
+                                 uint32_t *rtp) {
+  if (!engine || !rtp || !engine->initialized ||
+      __atomic_load_n(&engine->scheduler.state, __ATOMIC_RELAXED) !=
+          AUDIO_SCHED_PLAYING) {
+    return false;
+  }
+  *rtp = __atomic_load_n(&engine->scheduler.cursor_rtp, __ATOMIC_RELAXED);
+  return true;
+}
+
 size_t audio_engine_v2_deferred_flush(audio_engine_v2_t *engine, uint32_t epoch,
                                       uint32_t flush_rtp) {
   if (!engine || !engine->initialized) {

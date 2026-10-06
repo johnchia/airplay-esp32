@@ -78,6 +78,11 @@ bool audio_engine_v2_set_anchor(audio_engine_v2_t *engine, uint32_t anchor_rtp,
 void audio_engine_v2_wait_for_anchor(audio_engine_v2_t *engine, int64_t now_us);
 void audio_engine_v2_set_playing(audio_engine_v2_t *engine, bool playing);
 bool audio_engine_v2_is_nearly_full(audio_engine_v2_t *engine);
+/* The RTP of the next frame to play, while the scheduler is playing.  Read
+ * without a lock, so it can be a block out of date: the realtime receive task
+ * only uses it to stop asking for packets that are already due. */
+bool audio_engine_v2_play_cursor(const audio_engine_v2_t *engine,
+                                 uint32_t *rtp);
 
 /* AirPlay 2 deferred FLUSHBUFFERED.  Drops buffered PCM from `flush_rtp`
  * onwards while leaving earlier audio, the epoch and the clock map intact, so

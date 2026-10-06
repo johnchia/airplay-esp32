@@ -68,10 +68,9 @@ static void audio_receiver_reset_stats(void) {
 }
 
 static void audio_receiver_reset_resend_state(void) {
-  receiver.rtp_sequence_valid = false;
-  receiver.resend_window_first = 0;
-  receiver.resend_missing_mask = 0;
-  receiver.resend_last_request_time_us = 0;
+  // The realtime receive task owns the tracker and resets it before its next
+  // packet, so a flush cannot tear it from under a packet being counted.
+  __atomic_add_fetch(&receiver.resend_generation, 1U, __ATOMIC_RELEASE);
   receiver.last_resend_error_time_us = 0;
 }
 

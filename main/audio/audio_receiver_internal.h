@@ -22,6 +22,7 @@
 #include "audio_receiver.h"
 #include "audio_stream.h"
 #include "audio_timing.h"
+#include "rtp_resend.h"
 
 #define MAX_RTP_PACKET_SIZE 2048
 
@@ -99,10 +100,18 @@ typedef struct audio_receiver_state {
   struct sockaddr_in client_control_addr; // Client's control address for NACKs
   bool retransmit_enabled;                // True when client address is set
   int64_t last_resend_error_time_us;      // Backoff timer on sendto failure
-  bool rtp_sequence_valid;
-  uint16_t resend_window_first;
-  uint64_t resend_missing_mask;
-  int64_t resend_last_request_time_us;
+  // The realtime stream's missing packets, owned by its receive task.  Other
+  // tasks reset it by bumping resend_generation, and the receive task does
+  // the reset itself before it next touches the tracker.
+  rtp_resend_t resend;
+  uint32_t resend_generation;
+  uint32_t resend_generation_seen;
+  // For the receive task's status line: when it last reported, the most bytes
+  // it found still queued on the socket after a read, and decoded packets the
+  // timeline turned away, since then.
+  int64_t resend_report_us;
+  uint32_t resend_queue_max;
+  uint32_t resend_rejected;
 
   // Post-seek RTP gates: together they form a window [discard_before_rtp,
   // discard_above_rtp] around the new anchor.  Frames outside the window are
