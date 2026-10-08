@@ -125,9 +125,10 @@ Two things do not carry over:
 
 The **input mixer** is TAS5825M-only too. Summing to mono or feeding one channel to both
 outputs is done in the DSP mixer, and only the TAS5825M's mixer is implemented here, so
-a TAS5805M passes the stereo pair straight through and logs a warning if asked for
-anything else. That also means no crossover layout needing a summed or single-channel
-feed — the ones that route the pair as-is still work.
+a TAS5805M passes the stereo pair straight through: the [Equaliser](#equaliser) page
+shows its routing greyed out, and the firmware refuses any other. That also means no
+crossover layout needing a summed or single-channel feed — the page rules those out, and
+the ones that route the pair as-is still work.
 
 ## Equaliser
 
@@ -239,7 +240,8 @@ until **Apply**, which sends the routing and levels along with the filters, and 
 survives a reboot until committed. Filters are redesigned for the board's own sample
 rate, so a tuning moves between rates intact. The exception is a custom section that
 matches no filter shape: it stays as raw coefficients, which depend on the rate, and the
-page says so. A file with more amplifiers than the board fills the ones it has.
+page says so. A file with more amplifiers than the board fills the ones it has. A
+TAS5805M, having no routing to choose, saves none and keeps its own when a file has one.
 
 ## Full PPC3 tuning
 

@@ -2018,6 +2018,10 @@ static const char *eqb_role(int dev) {
 static bool eqb_pbtl(int dev) {
   return dac_tas58xx_is_pbtl(dev);
 }
+/* A TAS5805M cannot route its inputs, so it has only the one routing. */
+static bool eqb_mix_fixed(int dev) {
+  return !dac_tas58xx_can_route(dev);
+}
 static uint32_t eqb_rate(void) {
   return dac_tas58xx_bq_sample_rate();
 }
@@ -2109,6 +2113,10 @@ static const char *eqb_role(int dev) {
   return "stereo";
 }
 static bool eqb_pbtl(int dev) {
+  (void)dev;
+  return false;
+}
+static bool eqb_mix_fixed(int dev) {
   (void)dev;
   return false;
 }
@@ -2293,6 +2301,7 @@ static esp_err_t bq_get_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(amp, "ganged", eqb_get_ganged(d));
     cJSON_AddNumberToObject(amp, "mix", eqb_get_mix(d));
     cJSON_AddBoolToObject(amp, "pbtl", eqb_pbtl(d));
+    cJSON_AddBoolToObject(amp, "mix_fixed", eqb_mix_fixed(d));
 
     cJSON *gains = cJSON_AddArrayToObject(amp, "gains");
     cJSON *mutes = cJSON_AddArrayToObject(amp, "mutes");
@@ -2391,6 +2400,13 @@ static esp_err_t bq_post_handler(httpd_req_t *req) {
     if (!json_int_in_range(mix, 0, EQB_MIX_COUNT - 1)) {
       cJSON_Delete(json);
       httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad 'mix'");
+      return ESP_FAIL;
+    }
+    /* 0 is the pair straight through, on either backend. */
+    if (mix->valueint != 0 && eqb_mix_fixed(dev)) {
+      cJSON_Delete(json);
+      httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                          "This amplifier cannot route its inputs");
       return ESP_FAIL;
     }
     eqb_set_mix(dev, mix->valueint);
