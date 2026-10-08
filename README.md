@@ -18,6 +18,24 @@
 
 ---
 
+## About this fork
+
+This fork ([johnchia/airplay-esp32](https://github.com/johnchia/airplay-esp32)) adds the
+following on its `eq-and-playback-fixes` branch, on top of upstream's `staging`:
+
+- **Software EQ for DACs without a DSP** — the `/bq` page's filters, routing and trims,
+  applied to USB and Bluetooth audio too
+  ([#170](https://github.com/rbouteiller/airplay-esp32/pull/170)); a tuning saves to a
+  file and loads back
+- **Steadier AirPlay** — the PTP lock holds through clock steps, congestion and track
+  changes; pause and seek resume in the right place without dropping audio; lost
+  realtime-stream packets are asked for again until their audio is due
+- **Cleaner output** — drift corrections spread over each block, an I2S clock that keeps
+  running through a flush, and an optional 32-bit I2S output
+- **USB speaker fixes** — no crackle while the web UI is open, and the bottom of the
+  host's volume slider stays audible
+- **Louder-ESP32-Mini** — `louder-esp32-s3-mini`, whose TAS5805M is bridged in copper
+
 ## What is this?
 
 This turns a cheap ESP32 board into a wireless AirPlay 2 speaker. Plug it into any
