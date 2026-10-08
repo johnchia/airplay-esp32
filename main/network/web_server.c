@@ -2009,12 +2009,10 @@ static int eqb_devices(void) {
 }
 
 /* Which amplifier a chain belongs to, so the page can label the columns
- * without duplicating the dual-DAC wiring logic. */
+ * without duplicating the wiring logic: the second amplifier of a dual-DAC
+ * board can be bridged, and so can a board's only one. */
 static const char *eqb_role(int dev) {
-  if (dev == 0) {
-    return "stereo";
-  }
-  return dac_tas58xx_get_active_second_pbtl() ? "mono" : "stereo";
+  return dac_tas58xx_is_pbtl(dev) ? "mono" : "stereo";
 }
 
 static bool eqb_pbtl(int dev) {

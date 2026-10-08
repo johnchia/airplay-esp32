@@ -988,7 +988,9 @@ function chainLabel(a){
 function drawMix(){
   var a=data.amps[amp],sel=$('mix'),h='';
   for(var m=0;m<MIXES.length;m++){
-    if(a.pbtl&&m===0)continue; /* one driver cannot carry a stereo pair */
+    /* One driver cannot carry a stereo pair. A bridged TAS5805M still
+       reports it, being unable to route; it plays the left channel. */
+    if(a.pbtl&&m===0&&a.mix!==0)continue;
     h+="<option value='"+m+"'>"+MIXES[m]+'</option>';
   }
   sel.innerHTML=h;

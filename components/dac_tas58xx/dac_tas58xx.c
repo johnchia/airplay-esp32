@@ -1206,11 +1206,16 @@ static esp_err_t tas58xx_init(void *i2c_bus) {
   }
 
   /*
-   * Role assignment. A single chip always drives stereo satellites. On a
-   * dual-DAC board the second chip is either a bridged (PBTL) mono amplifier
-   * fed L+R, or a second stereo pair. Any crossover between the two is a
-   * matter for the biquad chains, not for the wiring.
+   * Role assignment. A single chip drives stereo satellites, unless the board
+   * wires its outputs bridged (CONFIG_TAS58XX_PBTL), which is fixed in copper
+   * rather than chosen. On a dual-DAC board the second chip is either a
+   * bridged (PBTL) mono amplifier fed L+R, or a second stereo pair. Any
+   * crossover between the two is a matter for the biquad chains, not for the
+   * wiring.
    */
+#ifdef CONFIG_TAS58XX_PBTL
+  s_devs[0].pbtl_mono = true;
+#endif
   if (s_dev_count > 1) {
     s_active_second_pbtl = s_second_pbtl;
     if (s_second_pbtl) {
@@ -1219,18 +1224,24 @@ static esp_err_t tas58xx_init(void *i2c_bus) {
     ESP_LOGI(TAG, "Detected %d TAS58xx device(s) - second is %s", s_dev_count,
              s_second_pbtl ? "PBTL mono" : "stereo");
   } else {
-    ESP_LOGI(TAG, "Detected %d TAS58xx device(s) - stereo", s_dev_count);
+    ESP_LOGI(TAG, "Detected %d TAS58xx device(s) - %s", s_dev_count,
+             s_devs[0].pbtl_mono ? "PBTL mono" : "stereo");
   }
 
   /* A bridged amplifier drives one output, so summing L+R into it is the only
    * sensible default; everything else passes the pair straight through. A
    * stereo routing stored before the amplifier was bridged is meaningless now,
-   * so it falls back to the sum as well. */
+   * so it falls back to the sum as well. A TAS5805M cannot route at all (see
+   * tas58xx_apply_input_mix()), so a bridged one keeps the pair: it plays the
+   * left I2S channel, and the output channel mode decides what that carries.
+   * Asking it for the sum would only cost it the output trims. */
   for (int i = 0; i < s_dev_count; i++) {
-    s_devs[i].mix = s_dev_mix_cfg[i]      ? s_dev_mix[i]
-                    : s_devs[i].pbtl_mono ? TAS58XX_MIX_MONO
-                                          : TAS58XX_MIX_STEREO;
-    if (s_devs[i].pbtl_mono && s_devs[i].mix == TAS58XX_MIX_STEREO) {
+    const bool sum =
+        s_devs[i].pbtl_mono && s_devs[i].model != TAS58XX_MODEL_TAS5805M;
+    s_devs[i].mix = s_dev_mix_cfg[i] ? s_dev_mix[i]
+                    : sum            ? TAS58XX_MIX_MONO
+                                     : TAS58XX_MIX_STEREO;
+    if (sum && s_devs[i].mix == TAS58XX_MIX_STEREO) {
       s_devs[i].mix = TAS58XX_MIX_MONO;
     }
     s_dev_mix[i] = s_devs[i].mix;
