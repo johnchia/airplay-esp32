@@ -35,6 +35,9 @@ following on its `eq-and-playback-fixes` branch, on top of upstream's `staging`:
 - **USB speaker fixes** — no crackle while the web UI is open, and the bottom of the
   host's volume slider stays audible
 - **Louder-ESP32-Mini** — `louder-esp32-s3-mini`, whose TAS5805M is bridged in copper
+- **USB-C power on the 55 mm Mini** — it asks a USB-PD charger for up to 20 V, set on the
+  settings page, so the amplifier plays louder before it clips: about 9 W into 4 Ω at
+  9 V, against 3 W on the 5 V every port gives
 
 ## What is this?
 
