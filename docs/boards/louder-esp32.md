@@ -83,19 +83,20 @@ both.
 Choose the voltage under **USB-C Power** on the settings page. It starts at 5 V, so no
 speaker gets more than it was set up for, and the choice is kept across restarts. The
 amplifier's gain does not change with its supply, only how far it can swing before it
-clips, so full volume is raised to use the headroom:
+clips, so full volume is set to the loudest level that stays clean on it:
 
 | Supply | Full volume | Most it delivers, 4 Ω / 8 Ω |
 | --- | --- | --- |
-| 5 V | −10 dB | about 3 / 1.5 W |
-| 9 V | −10 dB | about 9 / 4.5 W |
+| 5 V | −16.5 dB | about 3 / 1.5 W |
+| 9 V | −11 dB | about 9 / 4.5 W |
 | 12 V | −8.5 dB | about 15 / 8 W |
 | 15 V | −7 dB | about 22 / 11 W |
 | 20 V | −4.5 dB | about 39 / 19 W |
 
 Choose what your speaker can take. 20 V needs a 65 W charger; a 30 W one manages 15 V. A
 charger that does not offer the voltage you chose gets the highest one below it, and a
-supply without USB-PD, such as a computer's port, stays at 5 V.
+supply without USB-PD, such as a computer's port, stays at 5 V. The 42 mm board, which
+has no trigger, always plays at the 5 V level.
 
 !!! note "Never more than 20 V"
 

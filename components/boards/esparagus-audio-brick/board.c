@@ -196,7 +196,10 @@ esp_err_t iot_board_init(void) {
 #ifdef CONFIG_HUSB238A
   /* Settle the amplifier's supply before the amplifier comes up. A board
    * without the trigger (the 42 mm Louder-ESP32-Mini, say) does not answer
-   * at its address and stays on the 5 V every USB-C port gives. */
+   * at its address and stays on the 5 V every USB-C port gives, so that is
+   * the supply until the trigger reports another. A level clean on 5 V is
+   * clean on anything higher. */
+  dac_tas58xx_set_supply_mv(5000);
   int pd_volts = CONFIG_HUSB238A_DEFAULT_VOLTS;
   settings_get_usb_pd_volts(&pd_volts);
   husb238a_init(s_i2c_bus_handle, pd_volts, dac_tas58xx_set_supply_mv);

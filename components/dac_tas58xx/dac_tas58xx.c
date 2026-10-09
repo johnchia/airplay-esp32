@@ -273,8 +273,8 @@ static bool s_active_second_pbtl = true;
 /* Cached master AirPlay volume so a level change can be re-applied alone. */
 static float s_last_airplay_db = -15.0f;
 
-/* DAC level for AirPlay full volume: CONFIG_TAS58XX_MAX_VOLUME, raised when a
- * negotiated supply leaves the output room to swing further before it clips
+/* DAC level for AirPlay full volume: CONFIG_TAS58XX_MAX_VOLUME, until a
+ * negotiated supply sets the loudest level that does not clip on it
  * (dac_tas58xx_set_supply_mv). */
 static float s_max_volume_db = (float)CONFIG_TAS58XX_MAX_VOLUME;
 
@@ -1597,12 +1597,12 @@ void dac_tas58xx_set_supply_mv(int supply_mv) {
   float max_db = (float)CONFIG_TAS58XX_MAX_VOLUME;
   if (supply_mv > 0) {
     /* The loudest level that still clears the supply, in the register's
-     * 0.5 dB steps. Never below the configured level: a supply that low
-     * already clipped before there was anything to negotiate. */
+     * 0.5 dB steps. It replaces the configured level in both directions, so
+     * a 5 V supply plays full volume clean rather than clipped. */
     float clean_db = 20.0f * log10f(SWING_PER_SUPPLY * (float)supply_mv /
                                     1000.0f / FULL_SCALE_PEAK_V);
     clean_db = floorf(clean_db * 2.0f) / 2.0f;
-    max_db = fmaxf(max_db, fminf(clean_db, 0.0f));
+    max_db = fminf(clean_db, 0.0f);
   }
   if (max_db == s_max_volume_db) {
     return;
