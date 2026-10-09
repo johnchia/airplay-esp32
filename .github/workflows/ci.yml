@@ -80,6 +80,9 @@ jobs:
       - name: Test the USB-PD trigger against a simulated charger
         run: python3 tests/husb238a/run.py
 
+      - name: Test the rate a TAS5805M's filters are designed at
+        run: python3 tests/tas5805m_rate/run.py
+
   lint-check:
     needs: changes
     if: needs.changes.outputs.code == 'true'
