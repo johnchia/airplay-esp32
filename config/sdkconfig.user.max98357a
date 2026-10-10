@@ -1,0 +1,23 @@
+# MAX98357A I2S amp on ESP32-S3
+#   GPIO9  -> LRC (WS)
+#   GPIO10 -> BCLK
+#   GPIO11 -> DIN
+#   GPIO12 -> GAIN (left undriven = 9 dB)
+#   GPIO13 -> SD   (driven high = amp enabled)
+#   GPIO14 -> unused
+# Amp Vin/GND must go to the board's 5V/GND pins, not GPIOs.
+CONFIG_I2S_SCK_IO=-1
+CONFIG_I2S_WS_IO=9
+CONFIG_I2S_BCK_IO=10
+CONFIG_I2S_DO_IO=11
+# esp32s3 defaults drive GPIO14 as a GND pin; disable it
+CONFIG_I2S_GND_IO=-1
+CONFIG_I2S_VCC_IO=-1
+CONFIG_MUTE_GPIO=13
+CONFIG_MUTE_GPIO_LEVEL=0
+
+# Parametric EQ (/bq page) computed on the ESP32
+CONFIG_SOFTWARE_EQ=y
+
+# 32-bit I2S words, so the EQ and volume reach the amp unrounded
+CONFIG_I2S_32BIT_OUTPUT=y
