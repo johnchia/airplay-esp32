@@ -197,10 +197,42 @@ static void resend_service(audio_receiver_state_t *state) {
   resend_report(state, now);
 }
 
+/* What became of the packets, every PKT_REPORT_US while any fail to decrypt
+ * or the engine is not playing them.  Only this task touches the counts. */
+#define PKT_REPORT_US 5000000LL
+static struct {
+  int64_t since_us;
+  uint32_t received, decrypt_failed, rejected, accepted;
+} s_pkt;
+
+static void packet_report(audio_receiver_state_t *state,
+                          const audio_stream_t *stream, int64_t now) {
+  if (now - s_pkt.since_us < PKT_REPORT_US) {
+    return;
+  }
+  uint32_t cursor_rtp = 0;
+  const bool playing =
+      audio_engine_v2_play_cursor(&state->engine_v2, &cursor_rtp);
+  if (s_pkt.received != 0U && (s_pkt.decrypt_failed != 0U || !playing)) {
+    ESP_LOGW(TAG,
+             "packets: rx=%" PRIu32 " decrypt_failed=%" PRIu32
+             " rejected=%" PRIu32 " accepted=%" PRIu32
+             " playing=%d encrypt=%d key_len=%u gates=%d/%d",
+             s_pkt.received, s_pkt.decrypt_failed, s_pkt.rejected,
+             s_pkt.accepted, playing ? 1 : 0, (int)stream->encrypt.type,
+             (unsigned)stream->encrypt.key_len,
+             state->discard_before_rtp_valid ? 1 : 0,
+             state->discard_above_rtp_valid ? 1 : 0);
+  }
+  memset(&s_pkt, 0, sizeof(s_pkt));
+  s_pkt.since_us = now;
+}
+
 static bool realtime_receive_packet(audio_stream_t *stream, uint8_t *packet,
                                     struct sockaddr_in *src_addr,
                                     socklen_t *addr_len) {
   audio_receiver_state_t *state = audio_stream_state(stream);
+  packet_report(state, stream, esp_timer_get_time());
 
   ssize_t len = recvfrom(state->data_socket, packet, MAX_RTP_PACKET_SIZE, 0,
                          (struct sockaddr *)src_addr, addr_len);
@@ -221,6 +253,7 @@ static bool realtime_receive_packet(audio_stream_t *stream, uint8_t *packet,
   }
 
   state->stats.packets_received++;
+  s_pkt.received++;
   int queued = 0;
   if (ioctl(state->data_socket, FIONREAD, &queued) == 0 &&
       (uint32_t)queued > state->resend_queue_max) {
@@ -277,6 +310,7 @@ static bool realtime_receive_packet(audio_stream_t *stream, uint8_t *packet,
     if (decrypted_len < 0) {
       state->stats.decrypt_errors++;
       state->stats.packets_dropped++;
+      s_pkt.decrypt_failed++;
       return true;
     }
     audio_data = state->decrypt_buffer;
@@ -286,6 +320,9 @@ static bool realtime_receive_packet(audio_stream_t *stream, uint8_t *packet,
   if (!audio_stream_process_frame(state, timestamp, audio_data, audio_len)) {
     state->stats.packets_dropped++;
     state->resend_rejected++;
+    s_pkt.rejected++;
+  } else {
+    s_pkt.accepted++;
   }
 
   return true;

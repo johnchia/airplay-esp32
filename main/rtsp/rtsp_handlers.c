@@ -1144,6 +1144,17 @@ static void handle_setup(int socket, rtsp_conn_t *conn,
       bplist_find_data_deep(body, body_len, "shk", shk, sizeof(shk), &shk_len);
     }
 
+    // iOS 26.5 and later leave the key out when an app picks the receiver
+    // itself (Spotify's in-app picker, "AirplayHandoffDevice") for a realtime
+    // stream.  Nothing derived from the pairing decrypts it; a HomePod plays
+    // it, third-party receivers do not (shairport-sync #2238).  Say so, since
+    // the session otherwise looks healthy and simply stays silent.
+    if (request_has_streams && shk_len == 0 && ekey_len == 0) {
+      ESP_LOGW(TAG, "SETUP: stream has no key (shk); its audio cannot be "
+                    "decrypted. Pick this speaker from Control Center instead "
+                    "of the app.");
+    }
+
     audio_encrypt_t audio_encrypt = {0};
     bool encryption_set = false;
 
