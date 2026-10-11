@@ -46,12 +46,16 @@ typedef struct {
   uint64_t diag_decode_ok;
   uint64_t diag_decode_fail;
   uint64_t diag_pcm_inserted;
+  /* Every render call, paused or not: shows whether output asks at all. */
+  uint64_t render_calls;
 
-  /* One-shot startup watchdog. Armed by a valid anchor and cleared as soon
-   * as the scheduler reaches PLAYING. It is diagnostic only and never changes
+  /* Startup watchdog. Armed by an epoch's first valid anchor and cleared as
+   * soon as the scheduler reaches PLAYING; until then it reports every
+   * START_STALL_REPEAT_US. It is diagnostic only and never changes
    * scheduler, timeline, RTP gate, decoder, or I2S behavior. */
   bool start_watchdog_armed;
   int64_t start_watchdog_anchor_us;
+  int64_t start_watchdog_report_us;
   uint32_t start_watchdog_epoch;
   uint32_t start_watchdog_anchor_rtp;
 
