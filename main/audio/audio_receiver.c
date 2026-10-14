@@ -402,15 +402,26 @@ void audio_receiver_set_anchor_time(uint64_t clock_id, uint64_t network_time_ns,
   // already empty when the flush happened (forward-seek).
   if (receiver.arm_gate_on_next_anchor) {
     receiver.arm_gate_on_next_anchor = false;
+    // Once the backlog gate has seen the sequence break, the reader is on the
+    // new position, and an iPhone may have streamed well over 10 s of it by
+    // now. The upper gate only disarms on a frame that passes it, so a bound
+    // below what has already been read would reject every frame from here
+    // on. It is measured from the newest frame read instead.
+    uint32_t above_from = rtp_time;
+    const uint32_t last_read = receiver.stats.last_timestamp;
+    if (receiver.engine_v2_ready && !receiver.seek_backlog_valid &&
+        (int32_t)(last_read - rtp_time) > 0) {
+      above_from = last_read;
+    }
     receiver.seek_backlog_valid = false;
     receiver.discard_before_rtp = rtp_time;
     receiver.discard_before_rtp_valid = true;
-    receiver.discard_above_rtp = rtp_time + gate_window;
+    receiver.discard_above_rtp = above_from + gate_window;
     receiver.discard_above_rtp_valid = true;
     gates_armed = true;
-    ESP_LOGI(TAG,
-             "RTP gates armed on anchor: discard_before=%lu discard_above=%lu",
-             (unsigned long)rtp_time, (unsigned long)(rtp_time + gate_window));
+    ESP_LOGI(
+        TAG, "RTP gates armed on anchor: discard_before=%lu discard_above=%lu",
+        (unsigned long)rtp_time, (unsigned long)(above_from + gate_window));
     // What arrived between the flush and this anchor was kept: an iPhone
     // streams the new position for seconds before it sends the anchor, and
     // rejecting it all left the start waiting for the clock to reach the
