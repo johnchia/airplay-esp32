@@ -410,11 +410,12 @@ void audio_receiver_set_anchor_time(uint64_t clock_id, uint64_t network_time_ns,
     // on. It is measured from the newest frame read instead.
     uint32_t above_from = rtp_time;
     const uint32_t last_read = receiver.stats.last_timestamp;
-    if (receiver.engine_v2_ready && !receiver.seek_backlog_valid &&
+    if (receiver.engine_v2_ready && receiver.seek_backlog_ended &&
         (int32_t)(last_read - rtp_time) > 0) {
       above_from = last_read;
     }
     receiver.seek_backlog_valid = false;
+    receiver.seek_backlog_ended = false;
     receiver.discard_before_rtp = rtp_time;
     receiver.discard_before_rtp_valid = true;
     receiver.discard_above_rtp = above_from + gate_window;
@@ -807,6 +808,7 @@ void audio_receiver_stop(void) {
          sizeof(receiver.client_control_addr));
   audio_receiver_reset_resend_state();
   receiver.seek_backlog_valid = false;
+  receiver.seek_backlog_ended = false;
 
   audio_receiver_flush();
 }
@@ -884,6 +886,7 @@ void audio_receiver_seek_flush(void) {
       receiver.stats.last_timestamp + receiver.engine_v2.timeline.frame_samples;
   receiver.seek_backlog_dropped = 0;
   receiver.seek_backlog_valid = receiver.engine_v2_ready;
+  receiver.seek_backlog_ended = false;
   audio_receiver_flush();
   // Request that the RTP gate be armed as soon as the next anchor arrives.
   // This covers the forward-seek case where the buffer is already empty by
@@ -899,6 +902,7 @@ void audio_receiver_realtime_flush(bool until_valid, uint32_t until_rtp) {
   }
   audio_receiver_flush();
   receiver.seek_backlog_valid = false;
+  receiver.seek_backlog_ended = false;
   // A realtime sender streams the new audio over UDP straight after FLUSH,
   // and macOS sends its next anchor ~1.6 s later.  The blanket gate of a
   // buffered seek flush threw all of that away, and the start then waited

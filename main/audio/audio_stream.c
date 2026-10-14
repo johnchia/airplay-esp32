@@ -74,6 +74,7 @@ bool audio_stream_accept_timestamp(audio_receiver_state_t *state,
       return false;
     }
     state->seek_backlog_valid = false;
+    state->seek_backlog_ended = true;
     ESP_LOGI(TAG,
              "Seek: new audio from rtp=%" PRIu32 " after %" PRIu32
              " backlog frames (step %" PRId32 ")",

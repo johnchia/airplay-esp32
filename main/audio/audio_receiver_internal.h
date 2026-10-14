@@ -145,6 +145,9 @@ typedef struct audio_receiver_state {
   bool seek_backlog_valid;
   uint32_t seek_backlog_next_rtp;
   uint32_t seek_backlog_dropped;
+  // Set when that gate saw the sequence break, so the newest frame read is on
+  // the new position.  A realtime flush clears seek_backlog_valid without one.
+  bool seek_backlog_ended;
 
   // Snapshot of the expected RTP position taken the moment the sender signals
   // PAUSE (SETRATEANCHORTIME rate=0).  Path B in audio_receiver_set_anchor_time
