@@ -394,7 +394,11 @@ void app_main(void) {
     dac_tas58xx_set_full_volume_db(dac_tas58xx_clean_db(5000));
   }
 #endif
-  // Second-amplifier wiring must be known before the DAC is initialised.
+  // Amplifier wiring must be known before the DAC is initialised.
+  bool first_pbtl;
+  if (settings_get_first_pbtl(&first_pbtl) == ESP_OK) {
+    dac_tas58xx_set_first_pbtl(first_pbtl);
+  }
   bool second_pbtl;
   if (settings_get_second_pbtl(&second_pbtl) == ESP_OK) {
     dac_tas58xx_set_second_pbtl(second_pbtl);

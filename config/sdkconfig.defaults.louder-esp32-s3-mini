@@ -1,7 +1,7 @@
 # Louder-ESP32-Mini defaults (ESP32-S3-WROOM-1U-N8R8, TAS5805M bridged)
 # Same pins as the Louder-ESP32-S3, without its Ethernet or display. The board
 # ties OUT_A+ to OUT_A- and OUT_B+ to OUT_B-, so the amplifier must come up in
-# PBTL: never build this board without CONFIG_TAS58XX_PBTL.
+# PBTL: never build this board without CONFIG_TAS58XX_FORCE_PBTL.
 CONFIG_BOARD_LOUDER_ESP32_S3=y
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
@@ -9,7 +9,7 @@ CONFIG_SPIRAM_MODE_OCT=y
 
 CONFIG_DAC_TAS58XX=y
 CONFIG_DAC_CONTROLS_VOLUME=y
-CONFIG_TAS58XX_PBTL=y
+CONFIG_TAS58XX_FORCE_PBTL=y
 
 # The 55 mm board has a HUSB238A USB-PD trigger on the DAC's bus, which stays
 # at 5 V until it is asked for more. The 42 mm board has none, and the probe

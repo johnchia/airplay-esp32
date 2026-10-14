@@ -49,7 +49,7 @@ configurations for the 42 mm and 55 mm boards share the pins and the output wiri
 
 Its amplifier is **bridged (PBTL)**: the board ties each channel's two half-bridges
 together, so all four drive the one speaker. That is wiring, not a setting, so the board
-has a build of its own. `louder-esp32-s3-mini` sets `CONFIG_TAS58XX_PBTL`, which brings
+has a build of its own. `louder-esp32-s3-mini` sets `CONFIG_TAS58XX_FORCE_PBTL`, which brings
 the amplifier up bridged before its outputs ever switch.
 
 !!! danger "Only flash the Mini's own build"

@@ -86,7 +86,7 @@ static volatile int source_rate = 44100;
 static volatile bool resample_reinit_needed = false;
 /* A bridged amplifier plays only the left I2S channel, so a board wired that
  * way starts on the sum rather than on half of the music. */
-#ifdef CONFIG_TAS58XX_PBTL
+#ifdef CONFIG_TAS58XX_FORCE_PBTL
 static volatile audio_channel_mode_t channel_mode = AUDIO_CHANNEL_MONO;
 #else
 static volatile audio_channel_mode_t channel_mode = AUDIO_CHANNEL_STEREO;
