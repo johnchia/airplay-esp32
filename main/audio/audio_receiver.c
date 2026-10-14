@@ -187,7 +187,8 @@ static void audio_receiver_reset_engine_v2(void) {
   // differs from the last one decoded in epoch, which primes the decoder
   // (audio_stream_decode_encoded_packet()). The AAC decoder is not reset by
   // a flush, so its overlap buffers still hold the old position.
-  receiver.aac_prime_left = 0;
+  // aac_prime_left is left alone too: the decode worker owns it under the
+  // decoder mutex, and may already have primed a frame of the new epoch.
   receiver.engine_v2_anchor_pending = false;
 }
 
