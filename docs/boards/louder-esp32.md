@@ -49,12 +49,14 @@ configurations for the 42 mm and 55 mm boards share the pins and the output wiri
 
 Its amplifier is **bridged (PBTL)**: the board ties each channel's two half-bridges
 together, so all four drive the one speaker. That is wiring, not a setting, so the board
-has a build of its own. `louder-esp32-s3-mini` sets `CONFIG_TAS58XX_FORCE_PBTL`, which brings
-the amplifier up bridged before its outputs ever switch.
+has a build of its own. `louder-esp32-s3-mini` sets `CONFIG_TAS58XX_FORCE_PBTL`, which
+brings the amplifier up bridged before its outputs ever switch, and locks the settings
+page's Primary Amplifier choice to bridged.
 
 !!! danger "Only flash the Mini's own build"
 
-    A stereo Louder build drives the tied half-bridges against each other.
+    Every other Louder build starts the amplifier as a stereo pair, which drives the tied
+    half-bridges against each other, and lets the settings page choose stereo.
 
 A bridged TAS5805M plays the left I2S channel, and the TAS5805M has no input mixer to sum
 the pair into it here. So the board starts with the output channel set to **Mono (L+R)**.
