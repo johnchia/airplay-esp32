@@ -17,7 +17,8 @@
 #define OFFERS_DELAY    60  /* ms from GET_SRC_CAP until the offers land */
 #define SETTLE_DELAY    250 /* ms from a request until the supply settles */
 #define REJECT_BUSY     40
-#define LONG_AGO        (-100000)
+#define OWN_CONTRACT 90 /* ms from the offers until the chip's own contract */
+#define LONG_AGO     (-100000)
 
 static int bus_token, device_token, mutex_token;
 static bool locked;
@@ -30,6 +31,7 @@ static struct {
   bool pd;           /* it speaks USB-PD */
   bool sends_offers; /* its offers arrive unasked once the chip is enabled */
   bool accepts;      /* it agrees to what it offers */
+  int drop_gos;      /* commands the chip turns away as if busy */
   int offer_ma[HUSB238A_FIXED_PDOS];
   /* The chip. */
   uint8_t control1;
@@ -40,6 +42,7 @@ static struct {
   int pending;
   int settles_at;
   int busy_until;
+  bool go_done; /* STATUS1.AMS_SUCC: the last command was carried out */
   /* The clock, which only vTaskDelay moves. */
   int now;
   /* What happened. */
@@ -49,6 +52,8 @@ static struct {
   int selects[8];
   int n_selects;
   int ignored;
+  int first_go_at;
+  int changed_at; /* when a requested supply last settled */
   int supplies[8];
   int n_supplies;
 } sim;
@@ -109,10 +114,30 @@ static int code_volts(int code) {
              : 5;
 }
 
+/* Offers that arrive unasked make the chip settle on 5 V by itself, and
+ * it is busy from the moment it sees the cable until that is done. */
+static int own_contract_at(void) {
+  return sim.enabled_at + ATTACH_DEBOUNCE + OWN_CONTRACT;
+}
+
+static bool makes_own_contract(void) {
+  return sees_cable() && sim.pd && sim.sends_offers && sim.contract == 0 &&
+         !sim.pending;
+}
+
+static bool busy(void) {
+  return sim.now < sim.busy_until ||
+         (makes_own_contract() && sim.now < own_contract_at());
+}
+
 static void settle(void) {
   if (sim.pending && sim.now >= sim.settles_at) {
     sim.contract = sim.pending;
     sim.pending = 0;
+    sim.changed_at = sim.settles_at;
+  }
+  if (makes_own_contract() && sim.now >= own_contract_at()) {
+    sim.contract = 1;
   }
 }
 
@@ -128,7 +153,10 @@ static uint8_t reg_value(int reg) {
     return sim.src_pdo;
   case REG_STATUS:
     return (uint8_t)((sees_cable() ? STATUS_ATTACH : 0) |
-                     (sim.now < sim.busy_until ? STATUS_AMS_BUSY : 0));
+                     (busy() ? STATUS_AMS_BUSY : 0));
+  case REG_STATUS + BLK_STATUS1:
+    return (uint8_t)((has_offers() ? STATUS1_PD_COMM : 0) |
+                     (sim.go_done ? STATUS1_AMS_SUCC : 0));
   case REG_STATUS + BLK_CONTRACT:
     return (uint8_t)(sim.contract << 4);
   default:
@@ -190,8 +218,17 @@ esp_err_t board_i2c_write(i2c_master_dev_handle_t dev, uint8_t reg,
     sim.src_pdo = value;
   } else if (reg == REG_GO_COMMAND) {
     /* Never written on top of an exchange in flight. */
-    assert(sim.now >= sim.busy_until);
-    if (!chip_enabled()) {
+    assert(!busy());
+    if (sim.first_go_at < 0) {
+      sim.first_go_at = sim.now;
+    }
+    sim.go_done = chip_enabled() && sim.drop_gos == 0;
+    if (sim.drop_gos > 0) {
+      sim.drop_gos--;
+      if (value == GO_SELECT_PDO) {
+        sim.selects[sim.n_selects++] = code_volts(sim.src_pdo >> SRC_PDO_SHIFT);
+      }
+    } else if (!chip_enabled()) {
       sim.ignored++;
     } else if (value == GO_GET_SRC_CAP) {
       sim.get_caps++;
@@ -229,6 +266,7 @@ static void reset(int ma5, int ma9, int ma12, int ma15, int ma20) {
   memcpy(sim.offer_ma, ma, sizeof(ma));
   sim.enabled_at = LONG_AGO;
   sim.offers_at = -1;
+  sim.first_go_at = -1;
   s_dev = NULL;
   s_lock = NULL;
   s_on_supply = NULL;
@@ -307,6 +345,11 @@ static void test_enables_then_asks(void) {
   assert(husb238a_init(&bus_token, 20, on_supply) == ESP_OK);
   assert(husb238a_present() && sim.control1 == (0x05 | CONTROL1_ENABLE));
   assert(sim.ignored == 0 && sim.get_caps == 0);
+  /* Not before the chip's own contract, nor before ESPHome would ask; and
+   * the new supply has settled by the time the amplifier is started. */
+  assert(sim.first_go_at >= own_contract_at());
+  assert(sim.first_go_at >= sim.enabled_at + FIRST_ASK_MS);
+  assert(sim.now >= sim.changed_at + SUPPLY_SETTLE_MS);
 #if CONFIG_HUSB238A_MAX_VOLTS >= 20
   EXPECT_SELECTS(20);
   EXPECT_SUPPLIES(20000);
@@ -337,7 +380,10 @@ static void test_falls_back(void) {
 
   reset(3000, 3000, 3000, 3000, 3000);
   assert(husb238a_init(&bus_token, 3, on_supply) == ESP_OK);
-  EXPECT_SELECTS(5); /* a PD contract, for the charger's full 5 V current */
+  /* The chip's own contract is already the 5 V offer, at the charger's full
+   * 5 V current. */
+  EXPECT_NO_SELECTS();
+  assert(sim.contract == 1);
   EXPECT_SUPPLIES(5000);
   puts("ok   falls back to the highest offer at or below the voltage asked");
 }
@@ -386,6 +432,29 @@ static void test_warm_restart(void) {
   EXPECT_SELECTS(9);
   EXPECT_SUPPLIES(9000);
   puts("ok   keeps a contract in place, replaces one it never asks for");
+}
+
+static void test_dropped(void) {
+  /* A command the chip turns away is sent again, once. */
+  reset(3000, 3000, 3000, 3000, 3000);
+  sim.drop_gos = 1;
+  assert(husb238a_init(&bus_token, 9, on_supply) == ESP_OK);
+  EXPECT_SELECTS(9, 9);
+  EXPECT_SUPPLIES(9000);
+
+  reset(3000, 3000, 3000, 3000, 3000);
+  sim.drop_gos = SELECT_TRIES;
+  assert(husb238a_init(&bus_token, 9, on_supply) == ESP_OK);
+  assert(sim.n_selects == SELECT_TRIES);
+  EXPECT_SUPPLIES(5000);
+
+  /* A chip that stays busy is not written to at all. */
+  reset(3000, 3000, 3000, 3000, 3000);
+  sim.busy_until = 1000000;
+  assert(husb238a_init(&bus_token, 9, on_supply) == ESP_ERR_TIMEOUT);
+  EXPECT_NO_SELECTS();
+  assert(sim.first_go_at < 0);
+  puts("ok   resends a dropped request once, never writes to a busy chip");
 }
 
 static void test_changes(void) {
@@ -440,6 +509,7 @@ int main(void) {
   test_asks_for_offers();
   test_not_pd();
   test_warm_restart();
+  test_dropped();
   test_changes();
   test_refused();
   return 0;

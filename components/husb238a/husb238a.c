@@ -50,6 +50,9 @@ static const char TAG[] = "husb238a";
 #define BLK_STATUS       0 /* 0x63 */
 #define STATUS_ATTACH    0x01
 #define STATUS_AMS_BUSY  0x80 /* a PD message exchange is in flight */
+#define BLK_STATUS1      1    /* 0x64 */
+#define STATUS1_PD_COMM  0x10 /* the charger's offers have been heard */
+#define STATUS1_AMS_SUCC 0x04 /* the last GO_COMMAND was carried out */
 #define BLK_CONTRACT     4    /* 0x67: bits 7:4 hold the agreed offer */
 #define BLK_OFFERS       7    /* 0x6A-0x6E: one per fixed offer */
 #define OFFER_DETECT     0x80
@@ -67,6 +70,16 @@ static const char TAG[] = "husb238a";
 #define OFFERS_WAIT_MS   800
 #define IDLE_WAIT_MS     300
 #define CONTRACT_WAIT_MS 1500
+/* Once enabled, the chip makes a contract of its own as soon as it hears the
+ * charger's offers. Nothing is asked of it until that one is in place, and
+ * never sooner than FIRST_ASK_MS after ENABLE, the wait Sonocotta's ESPHome
+ * component uses. Asking any sooner made some chargers reset. */
+#define FIRST_CONTRACT_WAIT_MS 1000
+#define FIRST_ASK_MS           300
+/* Time for a supply that has just changed to settle before the amplifier is
+ * started on it or told of it. */
+#define SUPPLY_SETTLE_MS 150
+#define SELECT_TRIES     2
 
 const int husb238a_fixed_volts[HUSB238A_FIXED_PDOS] = {5, 9, 12, 15, 20};
 
@@ -136,22 +149,58 @@ static bool any_offer(const uint8_t *block) {
   return false;
 }
 
-/* Let a PD message exchange in flight finish: a command written on top of
- * one can clobber it. */
-static void wait_idle(void) {
+/* Let a PD message exchange in flight finish. A command is never written on
+ * top of one: the chip drops it at best. */
+static esp_err_t wait_idle(void) {
   uint8_t status;
-  for (int t = 0; t < IDLE_WAIT_MS; t += POLL_MS) {
-    if (read_regs(REG_STATUS, &status, 1) != ESP_OK ||
-        !(status & STATUS_AMS_BUSY)) {
-      return;
+  for (int t = 0;; t += POLL_MS) {
+    esp_err_t err = read_regs(REG_STATUS, &status, 1);
+    if (err != ESP_OK || !(status & STATUS_AMS_BUSY)) {
+      return err;
+    }
+    if (t >= IDLE_WAIT_MS) {
+      return ESP_ERR_TIMEOUT;
     }
     vTaskDelay(pdMS_TO_TICKS(POLL_MS));
   }
 }
 
 static esp_err_t command(uint8_t go) {
-  wait_idle();
+  esp_err_t err = wait_idle();
+  if (err == ESP_ERR_TIMEOUT) {
+    ESP_LOGW(TAG, "The USB-PD trigger is still busy; command 0x%02X not sent",
+             go);
+  }
+  if (err != ESP_OK) {
+    return err;
+  }
   return write_reg(REG_GO_COMMAND, go);
+}
+
+/* Wait for the contract the chip makes by itself once enabled: the offers
+ * heard, a contract in place and no exchange in flight. @p just_enabled holds
+ * off until FIRST_ASK_MS after ENABLE as well. Gives up quietly: a cable
+ * with nothing on it, or a supply without USB-PD, never gets that far. */
+static void wait_first_contract(bool just_enabled) {
+  uint8_t block[BLK_LEN];
+  int t = 0;
+  for (;; t += POLL_MS) {
+    if (read_regs(REG_STATUS, block, BLK_LEN) != ESP_OK) {
+      break;
+    }
+    const bool settled = (block[BLK_STATUS1] & STATUS1_PD_COMM) &&
+                         offer_code(block) != CODE_PLAIN_USB &&
+                         !(block[BLK_STATUS] & STATUS_AMS_BUSY);
+    const bool no_cable =
+        t >= ATTACH_WAIT_MS && !(block[BLK_STATUS] & STATUS_ATTACH);
+    if (settled || no_cable || t >= FIRST_CONTRACT_WAIT_MS) {
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(POLL_MS));
+  }
+  if (just_enabled && t < FIRST_ASK_MS) {
+    vTaskDelay(pdMS_TO_TICKS(FIRST_ASK_MS - t));
+  }
 }
 
 /* Read the status block until the cable is attached and the charger's offers
@@ -229,17 +278,27 @@ static esp_err_t negotiate(int volts) {
       (block[BLK_OFFERS + pick] & OFFER_CURRENT) * OFFER_MA_PER_LSB;
   ESP_LOGI(TAG, "Asking for %d V, offered at up to %d.%d A",
            husb238a_fixed_volts[pick], offer_ma / 1000, offer_ma % 1000 / 100);
-  err = write_reg(REG_SRC_PDO, (uint8_t)(code << SRC_PDO_SHIFT));
-  if (err == ESP_OK) {
-    err = command(GO_SELECT_PDO);
-  }
-  for (int t = 0; err == ESP_OK && t < CONTRACT_WAIT_MS; t += POLL_MS) {
-    vTaskDelay(pdMS_TO_TICKS(POLL_MS));
-    err = read_regs(REG_STATUS, block, BLK_LEN);
-    if (err == ESP_OK && offer_code(block) == code &&
-        !(block[BLK_STATUS] & STATUS_AMS_BUSY)) {
+  for (int attempt = 0; attempt < SELECT_TRIES; attempt++) {
+    err = write_reg(REG_SRC_PDO, (uint8_t)(code << SRC_PDO_SHIFT));
+    if (err == ESP_OK) {
+      err = command(GO_SELECT_PDO);
+    }
+    for (int t = 0; err == ESP_OK && t < CONTRACT_WAIT_MS; t += POLL_MS) {
+      vTaskDelay(pdMS_TO_TICKS(POLL_MS));
+      err = read_regs(REG_STATUS, block, BLK_LEN);
+      if (err == ESP_OK && offer_code(block) == code &&
+          !(block[BLK_STATUS] & STATUS_AMS_BUSY)) {
+        break;
+      }
+    }
+    /* A request the charger turned down is not asked again; one the chip
+     * never sent is. */
+    if (err != ESP_OK || offer_code(block) == code ||
+        (block[BLK_STATUS1] & STATUS1_AMS_SUCC)) {
       break;
     }
+    ESP_LOGW(TAG, "The request for %d V was not sent",
+             husb238a_fixed_volts[pick]);
   }
   if (err != ESP_OK) {
     return err;
@@ -247,6 +306,7 @@ static esp_err_t negotiate(int volts) {
 
   if (offer_code(block) == code) {
     ESP_LOGI(TAG, "Supply now %d V", husb238a_fixed_volts[pick]);
+    vTaskDelay(pdMS_TO_TICKS(SUPPLY_SETTLE_MS));
   } else {
     ESP_LOGW(TAG, "The charger refused %d V; supply %d mV",
              husb238a_fixed_volts[pick], contract_mv(block));
@@ -285,7 +345,8 @@ esp_err_t husb238a_init(i2c_master_bus_handle_t bus, int volts,
   if (err == ESP_OK) {
     err = read_regs(REG_CONTROL1, &control1, 1);
   }
-  if (err == ESP_OK && !(control1 & CONTROL1_ENABLE)) {
+  const bool just_enabled = err == ESP_OK && !(control1 & CONTROL1_ENABLE);
+  if (just_enabled) {
     err = write_reg(REG_CONTROL1, control1 | CONTROL1_ENABLE);
   }
   if (err != ESP_OK) {
@@ -306,6 +367,7 @@ esp_err_t husb238a_init(i2c_master_bus_handle_t bus, int volts,
   ESP_LOGI(TAG, "USB-PD trigger found; asking for %d V", s_requested_volts);
 
   xSemaphoreTake(s_lock, portMAX_DELAY);
+  wait_first_contract(just_enabled);
   err = negotiate(s_requested_volts);
   xSemaphoreGive(s_lock);
   if (err != ESP_OK) {
