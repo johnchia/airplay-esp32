@@ -69,7 +69,8 @@ Configuration page.
 layered on, so the USB-C port that powers the board also makes it a USB speaker for the
 computer at the other end. The host's audio goes through the same mono mix, EQ and volume
 control as AirPlay's, and AirPlay is suspended while the host is streaming. It runs at
-48 kHz, and it suits Windows and Linux; a Mac needs `CONFIG_UAC_SUPPORT_MACOS=y`.
+48 kHz, and works with Windows and Linux; macOS should work too but hasn't been tried
+(see [USB audio](../features/usb-audio.md#caveats)).
 
 TinyUSB claims the USB port, so this build has no USB console, and reflashing over USB
 needs BOOT held while EN is pressed. [OTA updates](../reference/ota.md) sidestep both.
