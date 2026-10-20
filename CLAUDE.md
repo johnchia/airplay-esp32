@@ -229,7 +229,7 @@ scripts/lint.sh            # Run clang-tidy on all C/H files
 scripts/lint.sh --fix      # Attempt to auto-fix clang-tidy issues
 ```
 
-**Host tests**: `tests/pcm51xx/run.py`, `tests/audio_eq/run.py`, `tests/ptp_clock/run.py`, `tests/audio_scheduler/run.py`, `tests/rtp_resend/run.py`, `tests/husb238a/run.py` and `tests/tas5805m_rate/run.py` compile the real driver, EQ, PTP filter, scheduler, resend-tracker, USB-PD trigger and TAS5805M filter-rate code against small mocks with the host C compiler, and run in CI's `format-check` job. There is no test framework beyond that; everything else needs testing on hardware.
+**Host tests**: `tests/pcm51xx/run.py`, `tests/audio_eq/run.py`, `tests/ptp_clock/run.py`, `tests/audio_scheduler/run.py`, `tests/rtp_resend/run.py`, `tests/husb238a/run.py`, `tests/tas5805m_rate/run.py` and `tests/tas58xx_bq/run.py` compile the real driver, EQ, PTP filter, scheduler, resend-tracker, USB-PD trigger, TAS5805M filter-rate and TAS58xx filter-design code against small mocks with the host C compiler, and run in CI's `format-check` job. There is no test framework beyond that; everything else needs testing on hardware.
 
 ## Documentation site
 
