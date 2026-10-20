@@ -21,14 +21,14 @@ body{font-family:-apple-system,system-ui,sans-serif;background:linear-gradient(1
 .btn:disabled{opacity:0.5;cursor:not-allowed}
 .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
 .actions.top{margin:0 0 12px}
-/* Narrower than 1200 px the cards stack, the volume first as it always was.
+/* Narrower than 1200 px the cards stack: plots, output levels, chain.
    From 1200 px the plots sit on the left and stay in view while the chain
-   beside them is edited, with the volume under the chain. The width is the
+   beside them is edited, with the output levels above the chain. The width is the
    page's, not the screen's, which the navigation shares from 1440 px
    (data-nav-from above; under that it stays behind the menu button). */
 .cq{container-type:inline-size}
 .work{display:grid;grid-template-columns:minmax(0,1fr);
-      grid-template-areas:'vol' 'plots' 'chain'}
+      grid-template-areas:'plots' 'vol' 'chain'}
 #vol-card{grid-area:vol}
 #plots{grid-area:plots}
 #chain-card{grid-area:chain}
@@ -113,7 +113,7 @@ input:disabled,select:disabled{opacity:0.25}
 @container (min-width:1200px){
   .wrap{max-width:1800px}
   .work{grid-template-columns:minmax(0,1fr) 760px;column-gap:16px;
-        grid-template-areas:'plots chain' 'plots vol';align-items:start}
+        grid-template-areas:'plots vol' 'plots chain';align-items:start}
   /* Leaves room for the bar pinned under it. */
   #plots{position:sticky;top:16px;overflow-y:auto;
          max-height:calc(100vh - 128px - var(--sh-bottom,0px))}
@@ -261,7 +261,7 @@ that instead of correcting the band the driver does cover.</p>
 </div>
 
 <div class='card' id='vol-card'>
-<h2>Volume</h2>
+<h2>Output</h2>
 <div class='trim'>
 <label for='master'>Master</label>
 <input type='range' id='master' step='0.5' oninput='masterChanged()'
@@ -277,6 +277,13 @@ filter headroom.</p>
 <select id='pw-db' onchange='pickGain()' title='The level full volume
 reaches. Automatic keeps it at the loudest that stays clean on the supply with
 the EQ playing.'></select></div>
+</div>
+<div id='ab' style='display:none'>
+<div class='trim'><label for='ab-sel'>EQ runs on</label>
+<select id='ab-sel' onchange='pickAb()'>
+<option value='dsp'>Amplifier DSP</option>
+<option value='sw'>ESP32</option></select></div>
+<p class='hint' id='ab-hint'></p>
 </div>
 </div>
 </div>
@@ -1408,6 +1415,25 @@ function pickGain(){
     .then(function(d){gainInfo=d;Shell.tick(sel,true);},
           function(e){Shell.tick(sel,false,e.message);})
     .then(function(){drawPower();showHeadroom();});
+}
+/* ---- software A/B ----
+   The same filters on the ESP32 instead, to tell a fault in the amplifier's
+   DSP from one in the tuning by ear. The board saves the choice. */
+function drawAb(){
+  if(!data||data.software_ab===undefined){$('ab').style.display='none';return;}
+  $('ab').style.display='';
+  $('ab-sel').value=data.software_ab?'sw':'dsp';
+  $('ab-hint').textContent=data.software_ab
+    ?'The ESP32 plays these filters at the stream\'s rate, with the'+
+     ' amplifier\'s set flat and the level matched.'
+    :'Switch to hear the same filters played on the ESP32 instead.';
+}
+function pickAb(){
+  var sel=$('ab-sel'),on=sel.value==='sw';
+  Shell.post('/api/bq',{software_ab:on})
+    .then(function(){data.software_ab=on;Shell.tick(sel,true);},
+          function(e){Shell.tick(sel,false,e.message);})
+    .then(drawAb);
 }
 function loadPower(){
   return fetch('/api/audio/digital-gain').then(function(r){
@@ -2808,7 +2834,7 @@ function load(){
     if(isGanged(data.amps[amp]))ch=0;
     $('sub').textContent='15 biquads per output at '+d.rate+' Hz';
     var left=autoShape();
-    drawTabs();drawMix();drawGains();loadRows();plot();showPreamp();
+    drawTabs();drawMix();drawGains();loadRows();plot();showPreamp();drawAb();
     if(left)
       show($('msg'),left+' section'+(left>1?'s':'')+' stayed Custom: no shape'+
            ' this page offers reproduces the coefficients. They are still'+
