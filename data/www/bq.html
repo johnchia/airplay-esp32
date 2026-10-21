@@ -1436,6 +1436,9 @@ function pickAb(){
     .then(drawAb);
 }
 function loadPower(){
+  /* Digital gain is the TAS58xx's; a software EQ build has no such endpoint,
+     and asking anyway logs a warning on the device for every page load. */
+  if(softwareEq()){drawPower();showHeadroom();return Promise.resolve();}
   return fetch('/api/audio/digital-gain').then(function(r){
     if(!r.ok)return;
     return r.json().then(function(d){gainInfo=d;});
