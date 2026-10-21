@@ -571,6 +571,11 @@ void audio_output_stop(void) {
   } else {
     ESP_LOGI(TAG, "Playback task stopped");
   }
+#ifdef CONFIG_AUDIO_EQ
+  // The task stops mid-stream, so whatever writes next must not play the
+  // tails it left in the filters.
+  audio_eq_reset();
+#endif
 }
 
 esp_err_t audio_output_write(const void *data, size_t bytes, TickType_t wait) {
@@ -626,6 +631,7 @@ esp_err_t audio_output_write_pcm(const void *data, size_t bytes,
     }
 
     const void *words = process_pcm(stage, frames, volume_q15, &out);
+    feed_led(words, frames);
     size_t written = 0;
     err = i2s_channel_write(tx_handle, words, frames * OUT_FRAME_BYTES,
                             &written, wait);
@@ -646,8 +652,11 @@ void audio_output_set_sample_rate(uint32_t rate) {
   i2s_channel_reconfig_std_clock(tx_handle, &clk_cfg);
   s_output_rate = rate;
 #ifdef CONFIG_AUDIO_EQ
-  // Corners are relative to the clock, so follow it.
+  // Corners are relative to the clock, so follow it. The stream breaks here
+  // anyway, and this is where Bluetooth hands the output back without having
+  // rung its tails out, so start the filters from rest.
   audio_eq_set_rate(rate);
+  audio_eq_reset();
 #endif
   output_cursor_reset();
   i2s_channel_enable(tx_handle);
