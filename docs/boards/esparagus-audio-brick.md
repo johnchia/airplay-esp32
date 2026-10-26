@@ -136,6 +136,12 @@ equaliser, so the driver designs its sections for that rate, and the Equaliser p
 96000 Hz for a board whose I2S runs at 48 kHz. PPC3 computes the part's coefficients the
 same way.
 
+The TAS5805M's biquads also run at a different rate from its input. Its built-in process
+flow converts the audio to **96 kHz** (88.2 kHz for 44.1 kHz input) before the
+equaliser, so the driver designs its sections for that rate, and the Equaliser page shows
+96000 Hz for a board whose I2S runs at 48 kHz. PPC3 computes the part's coefficients the
+same way.
+
 ## Equaliser
 
 TAS5825M boards expose the DAC's 15 cascaded biquad sections through the device's web

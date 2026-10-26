@@ -75,6 +75,17 @@ control as AirPlay's, and AirPlay is suspended while the host is streaming. It r
 TinyUSB claims the USB port, so this build has no USB console, and reflashing over USB
 needs BOOT held while EN is pressed. [OTA updates](../reference/ota.md) sidestep both.
 
+### USB audio
+
+`louder-esp32-s3-mini-uac` is the same build with [USB audio](../features/usb-audio.md)
+layered on, so the USB-C port that powers the board also makes it a USB speaker for the
+computer at the other end. The host's audio goes through the same mono mix, EQ and volume
+control as AirPlay's, and AirPlay is suspended while the host is streaming. It runs at
+48 kHz, and plays from macOS, Windows and Linux hosts alike.
+
+TinyUSB claims the USB port, so this build has no USB console, and reflashing over USB
+needs BOOT held while EN is pressed. [OTA updates](../reference/ota.md) sidestep both.
+
 ### USB-C power on the 55 mm board
 
 The 55 mm board adds a Hynetek HUSB238A USB-PD trigger, so a USB-C charger can feed the
