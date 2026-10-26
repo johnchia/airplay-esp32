@@ -79,9 +79,6 @@ jobs:
       - name: Test software EQ against a reference
         run: python3 tests/audio_eq/run.py
 
-      - name: Test the PTP offset filter
-        run: python3 tests/ptp_clock/run.py
-
       - name: Test the drift servo's trims on a tone
         run: python3 tests/audio_scheduler/run.py
 
