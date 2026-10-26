@@ -481,13 +481,14 @@ bool tas58xx_bq_fits(const tas58xx_bq_t *bq) {
 
 void tas58xx_bq_design_chip(const tas58xx_bq_t *bq, double sample_rate_hz,
                             double out[5]) {
-  if (!bq || !out) {
+  if (!out) {
     return;
   }
+  /* Callers pack out[] unconditionally; a null bq designs unity. */
   tas58xx_bq_design(bq, sample_rate_hz, out);
   /* Packed, these would saturate and leave the chain running a different
    * filter altogether. */
-  if (!bq_fits(out)) {
+  if (bq && !bq_fits(out)) {
     out[0] = bq->invert ? -1.0 : 1.0;
     out[1] = out[2] = out[3] = out[4] = 0.0;
   }
@@ -605,7 +606,8 @@ float tas58xx_bq_chain_peak_db(const double (*coeff)[5], int count,
   const float golden = 0.618034f;
   float best = 0.0f, best_f = 10.0f;
   float prev = 0.0f, cur = chain_power(polys, count, fs, 10.0f);
-  for (float f = 10.0f; f <= top; f *= step) {
+  float f = 10.0f;
+  while (f <= top) {
     const float next =
         f * step <= top ? chain_power(polys, count, fs, f * step) : 0.0f;
     if (cur > best) {
@@ -636,6 +638,7 @@ float tas58xx_bq_chain_peak_db(const double (*coeff)[5], int count,
     }
     prev = cur;
     cur = next;
+    f *= step;
   }
 
   if (at_hz) {

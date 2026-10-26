@@ -61,7 +61,10 @@ static void mirror_locked(void) {
       }
     }
   }
+  /* tas58xx_bq_t has no padding. Equal floats with different bytes (-0 and
+   * 0) only cost a redesign. */
   if (s_held_valid && ganged == s_held_ganged &&
+      // NOLINTNEXTLINE(bugprone-suspicious-memory-comparison)
       memcmp(chain, s_held, sizeof(chain)) == 0) {
     return;
   }
