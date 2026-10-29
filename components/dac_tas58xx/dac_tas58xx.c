@@ -100,7 +100,9 @@
 // There is no PBTL channel select: bridged, both parts play the left I2S
 // frame (TAS5805M/TAS5825M datasheets, PBTL Mode), so routing is the input
 // mixer's job.
-#define CTRL1_PBTL_EN (1 << 2) // DAMP_PBTL: parallel bridge-tied load (mono)
+#define CTRL1_PBTL_EN (1 << 2)   // DAMP_PBTL: parallel bridge-tied load (mono)
+#define CTRL1_DAMP_MOD_MASK 0x03 // DAMP_MOD: modulation scheme
+#define CTRL1_DAMP_MOD_BD   0x00 // BD modulation (reset value)
 
 /* ---------- DIG_VOL (0x4C) ---------- */
 // 0x00 = +24.0 dB, 0x30 = 0.0 dB, 0xFE = -103.0 dB, 0xFF = mute
@@ -823,6 +825,40 @@ static esp_err_t tas58xx_apply_pbtl(tas58xx_dev_t *dev) {
 }
 
 /*
+ * Hold a TAS5805M to BD modulation. 1SPW and Hybrid need at least 15 uH above
+ * 12 V PVDD (SLASEH5D Table 8-2) and these boards have 10 uH, so neither the
+ * init sequence nor a PPC3 dump may leave one selected. Only DAMP_MOD
+ * changes; DAMP_PBTL and FSW_SEL are kept. The TAS5825M is left as it is
+ * (its FSW_SEL codes differ). Like tas58xx_apply_pbtl(), this runs in HiZ on
+ * every power-on, as DEEP_SLEEP resets DEVICE_CTRL1. Assumes REG_LOCK is held
+ * and s_cur == dev.
+ */
+static esp_err_t tas58xx_apply_bd_mod(tas58xx_dev_t *dev) {
+  if (dev->model != TAS58XX_MODEL_TAS5805M) {
+    return ESP_OK;
+  }
+  uint8_t ctrl1 = 0;
+  esp_err_t err = tas58xx_read_reg(REG_DEVICE_CTRL1, &ctrl1);
+  if (err != ESP_OK) {
+    /* Writing a guess would clobber DAMP_PBTL and FSW_SEL. */
+    ESP_LOGE(TAG, "@0x%02X failed to read DEVICE_CTRL1: %s", dev->addr,
+             esp_err_to_name(err));
+    return err;
+  }
+  if ((ctrl1 & CTRL1_DAMP_MOD_MASK) != CTRL1_DAMP_MOD_BD) {
+    ESP_LOGW(TAG, "@0x%02X DAMP_MOD was %u, setting BD (DEVICE_CTRL1=0x%02X)",
+             dev->addr, (unsigned)(ctrl1 & CTRL1_DAMP_MOD_MASK), ctrl1);
+  }
+  ctrl1 = (uint8_t)((ctrl1 & ~CTRL1_DAMP_MOD_MASK) | CTRL1_DAMP_MOD_BD);
+  err = tas58xx_write_reg(REG_DEVICE_CTRL1, ctrl1);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "@0x%02X failed to set BD modulation: %s", dev->addr,
+             esp_err_to_name(err));
+  }
+  return err;
+}
+
+/*
  * A tuned PPC3 dump is a complete device configuration — clocking, I2S format,
  * the process flow select and every coefficient — so it stands in for the
  * built-in init sequence rather than running alongside it. That is what makes
@@ -1182,6 +1218,10 @@ static esp_err_t tas58xx_init_one(tas58xx_dev_t *dev) {
   if (err != ESP_OK) {
     return err;
   }
+  err = tas58xx_apply_bd_mod(dev);
+  if (err != ESP_OK) {
+    return err;
+  }
 
   // Give the device time to settle
   vTaskDelay(pdMS_TO_TICKS(10));
@@ -1460,6 +1500,7 @@ static void set_power_mode_dev(tas58xx_dev_t *dev, dac_power_mode_t mode) {
     /* DEVICE_CTRL1 is reset by DEEP_SLEEP and the device is in HiZ here, so
      * re-bridge the outputs before the output stage is allowed to drive. */
     tas58xx_apply_pbtl(dev);
+    tas58xx_apply_bd_mod(dev);
 
     /* DEEP_SLEEP also resets DIG_VOL to 0 dB, which would be a full-scale
      * blast on the first frame after PLAY. */
@@ -3244,7 +3285,10 @@ static void tas58xx_reload_hf_for_rate(void) {
 
     ESP_LOGI(TAG, "@0x%02X switching to %s", d->addr, d->hf_path);
     s_cur = d;
-    if (tas58xx_write_hf(d, d->hf_buf, d->hf_size) == ESP_OK) {
+    const esp_err_t hf_err = tas58xx_write_hf(d, d->hf_buf, d->hf_size);
+    /* Even a partly written dump may have reached DEVICE_CTRL1. */
+    tas58xx_apply_bd_mod(d);
+    if (hf_err == ESP_OK) {
       tas58xx_fixup_after_hf(d);
       /* The dump brought its own coefficients; ours would overwrite them. */
       d->dsp_defaults_written = true;
