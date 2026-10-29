@@ -95,10 +95,12 @@
 #define CTRL2_PLAY       0x03
 
 /* ---------- DEVICE_CTRL1 (0x02) bit fields ---------- */
-// Modulation mode (bits 0-1) and switching freq (bits 4-6) live here too;
-// use read-modify-write so those defaults are preserved.
-#define CTRL1_PBTL_EN     (1 << 2) // Parallel bridge-tied load (mono)
-#define CTRL1_PBTL_CH_SEL (1 << 1) // PBTL data source: 0 = left, 1 = right
+// DAMP_MOD (bits 1-0: 00 BD, 01 1SPW, 10 Hybrid) and FSW_SEL (bits 6-4) live
+// here too; use read-modify-write so the reset values (or a dump's) are kept.
+// There is no PBTL channel select: bridged, both parts play the left I2S
+// frame (TAS5805M/TAS5825M datasheets, PBTL Mode), so routing is the input
+// mixer's job.
+#define CTRL1_PBTL_EN (1 << 2) // DAMP_PBTL: parallel bridge-tied load (mono)
 
 /* ---------- DIG_VOL (0x4C) ---------- */
 // 0x00 = +24.0 dB, 0x30 = 0.0 dB, 0xFE = -103.0 dB, 0xFF = mute
@@ -787,17 +789,16 @@ static esp_err_t tas58xx_apply_pbtl(tas58xx_dev_t *dev) {
   }
   uint8_t ctrl1 = 0;
   tas58xx_read_reg(REG_DEVICE_CTRL1, &ctrl1);
+  /* Only DAMP_PBTL. Bits 1-0 are the modulation mode, not a channel select:
+   * setting bit 1 selects Hybrid modulation, which the 10 uH boards cannot
+   * take above 12 V and which needs its own start-up sequence. */
   ctrl1 |= CTRL1_PBTL_EN;
 
-  /* In PBTL mode, the channel selector bit (bit 1) determines which input
-   * channel feeds the bridged output. For mono mode (summed L+R), both channels
-   * are fed equally so the channel select bit doesn't matter. For left/right
-   * selection, the user can configure the input mixer to route only one
-   * channel.
-   *
-   * The key requirement: if stereo is selected while in PBTL mode, default to
-   * mono (summed) and prevent stereo. Left/right selection should be allowed
-   * and remembered.
+  /* The bridged output plays the left path, so which input it carries is
+   * the input mixer's routing (tas58xx_apply_input_mix()): Left, Right and
+   * Mono all feed both paths. Stereo would drop the right channel, so a
+   * part that can route sums the pair instead. Left/right selection is
+   * allowed and remembered.
    */
   if (dev->mix == TAS58XX_MIX_STEREO &&
       dac_tas58xx_can_route((int)(dev - s_devs))) {
@@ -808,27 +809,6 @@ static esp_err_t tas58xx_apply_pbtl(tas58xx_dev_t *dev) {
              "@0x%02X PBTL mode active - stereo selected, defaulting to mono",
              dev->addr);
     dev->mix = TAS58XX_MIX_MONO;
-  }
-
-  /* For PBTL, set the channel select bit based on the current mix setting.
-   * The input mixer handles which channels get summed to the output. */
-  switch (dev->mix) {
-  case TAS58XX_MIX_MONO:
-    /* Mono sums L+R to both outputs - channel select doesn't matter */
-    ctrl1 &= ~CTRL1_PBTL_CH_SEL;
-    break;
-  case TAS58XX_MIX_LEFT:
-    /* Left channel only - select left */
-    ctrl1 &= ~CTRL1_PBTL_CH_SEL;
-    break;
-  case TAS58XX_MIX_RIGHT:
-    /* Right channel only - select right */
-    ctrl1 |= CTRL1_PBTL_CH_SEL;
-    break;
-  default:
-    /* Default to left for any other setting */
-    ctrl1 &= ~CTRL1_PBTL_CH_SEL;
-    break;
   }
 
   esp_err_t err = tas58xx_write_reg(REG_DEVICE_CTRL1, ctrl1);
@@ -1480,35 +1460,6 @@ static void set_power_mode_dev(tas58xx_dev_t *dev, dac_power_mode_t mode) {
     /* DEVICE_CTRL1 is reset by DEEP_SLEEP and the device is in HiZ here, so
      * re-bridge the outputs before the output stage is allowed to drive. */
     tas58xx_apply_pbtl(dev);
-
-    /* Re-apply the channel selector after DEEP_SLEEP reset */
-    if (dev->pbtl_mono) {
-      uint8_t ctrl1 = 0;
-      tas58xx_read_reg(REG_DEVICE_CTRL1, &ctrl1);
-      /* Re-apply PBTL mode and channel selector based on current mix setting */
-      ctrl1 |= CTRL1_PBTL_EN;
-
-      switch (dev->mix) {
-      case TAS58XX_MIX_MONO:
-        ctrl1 &= ~CTRL1_PBTL_CH_SEL;
-        break;
-      case TAS58XX_MIX_LEFT:
-        ctrl1 &= ~CTRL1_PBTL_CH_SEL;
-        break;
-      case TAS58XX_MIX_RIGHT:
-        ctrl1 |= CTRL1_PBTL_CH_SEL;
-        break;
-      default:
-        ctrl1 &= ~CTRL1_PBTL_CH_SEL;
-        break;
-      }
-
-      esp_err_t err = tas58xx_write_reg(REG_DEVICE_CTRL1, ctrl1);
-      if (err != ESP_OK) {
-        ESP_LOGE(TAG, "@0x%02X failed to set PBTL channel selector: %s",
-                 dev->addr, esp_err_to_name(err));
-      }
-    }
 
     /* DEEP_SLEEP also resets DIG_VOL to 0 dB, which would be a full-scale
      * blast on the first frame after PLAY. */
@@ -2815,8 +2766,9 @@ static esp_err_t tas58xx_apply_input_mix(void) {
   /*
    * Input mixer gains live in Book 0x8C as 9.23 fixed point, but on a
    * different page per part (SLAA786A Table 9 vs SLOA263A Table 5).
-   * In PBTL the paralleled output follows one channel, so feeding both
-   * output paths makes the content independent of PBTL_CH_SEL.
+   * In PBTL the paralleled output plays the left path (there is no channel
+   * select), so the routings that feed both paths are the ones that reach
+   * a bridged amplifier intact.
    */
   const uint8_t mix_page = is_5805 ? MIX_PAGE_5805 : MIX_PAGE_5825;
   const uint8_t mix_base = is_5805 ? MIX_BASE_5805 : MIX_BASE_5825;
