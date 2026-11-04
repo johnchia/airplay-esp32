@@ -44,9 +44,12 @@ idf.py -p /dev/ttyUSB0 monitor
 | `smartamp` | ESP32 + Bluetooth | 4MB |
 | `hifi-esp32` | ESP32 + PCM5100 DAC | Plain I2S DAC, no I2C/mute pin; Ethernet + OLED |
 | `hifi-esp32-bt` | Same + Bluetooth | |
+| `hifi-esp32-plus` | ESP32 + PCM5122 DAC | Rev J1+ only: I2C-controlled DAC (0x4D) run from BCK, XSMT on GPIO 13; Ethernet + OLED |
+| `hifi-esp32-plus-bt` | Same + Bluetooth | |
 | `hifi-esparagus` | ESP32 + PCM5100 DAC | Plain I2S DAC, no I2C/mute pin, no Ethernet/display |
 | `hifi-esparagus-bt` | Same + Bluetooth | |
 | `hifi-esp32-s3` | ESP32-S3 + PCM5100 DAC | Ethernet + OLED |
+| `hifi-esp32-s3-plus` | ESP32-S3 + PCM5122 DAC | Rev H1+ only: HiFi-ESP32-S3 pins plus the DAC's I2C bus (42/41, 0x4D) and XSMT on GPIO 4 |
 | `hifi-esparagus-s3` | ESP32-S3 + PCM5100 DAC | OLED only, no Ethernet |
 | `loud-esp32` | ESP32 + MAX98357A I2S amp | No I2C; enable pin gated by playback play/pause, not just boot-released |
 | `loud-esp32-bt` | Same + Bluetooth | |
@@ -170,7 +173,7 @@ components/
 │   ├── waveshare-esp32s3/  # Waveshare ESP32-S3 board init
 │   ├── squeezeamp/         # SqueezeAMP (ESP32 + TAS5756)
 │   ├── hifi-esp32/         # HiFi-ESP32(-S3) / HiFi-Esparagus(-S3) (PCM5100)
-│   ├── hifi-esp32-plus/    # PCM5122 over I2C: HiFi-ESP32-Plus, Amped-ESP32-Plus(-S3)
+│   ├── hifi-esp32-plus/    # PCM5122 over I2C: HiFi-ESP32-Plus(-S3), Amped-ESP32-Plus(-S3)
 │   ├── loud-esp32/         # Loud-ESP32(-S3), Loud-Esparagus, Esparagus-Echo, Amped-ESP32(-S3), Amped-Esparagus (RTSP-gated amp enable pin)
 │   └── esparagus-audio-brick/ # Esparagus Audio Brick (ESP32/S3 + TAS58xx + W5500)
 ├── spiffs_storage/         # SPIFFS filesystem mount (stores web pages + DSP configs)
@@ -235,7 +238,7 @@ scripts/lint.sh            # Run clang-tidy on all C/H files
 scripts/lint.sh --fix      # Attempt to auto-fix clang-tidy issues
 ```
 
-**Host tests**: `tests/pcm51xx/run.py`, `tests/tas5805m_rate/run.py`, `tests/ptp_clock/run.py`, `tests/audio_eq/run.py`, `tests/audio_scheduler/run.py`, `tests/rtp_resend/run.py`, `tests/bplist/run.py`, `tests/husb238a/run.py` and `tests/tas58xx_bq/run.py` compile the real driver, TAS5805M filter-rate, PTP filter, EQ, scheduler, resend-tracker, binary-plist, USB-PD trigger and TAS58xx filter-design code with the host C compiler, using small mocks where needed, and run in CI's `format-check` job. The TAS5805M suite also uses Node.js to check the actual EQ page and driver/UI round trips, and `tests/bq_page/run.py` lifts the filter code out of `data/www/bq.html` and checks the page draws exactly what the firmware designs. There is no test framework beyond that; everything else needs testing on hardware.
+**Host tests**: `tests/pcm51xx/run.py`, `tests/tas5805m_rate/run.py`, `tests/ptp_clock/run.py`, `tests/audio_eq/run.py`, `tests/audio_scheduler/run.py`, `tests/rtp_resend/run.py`, `tests/bplist/run.py`, `tests/husb238a/run.py`, `tests/tas58xx_bq/run.py` and `tests/tas58xx_peak/run.py` compile the real driver, TAS5805M filter-rate, PTP filter, EQ, scheduler, resend-tracker, binary-plist, USB-PD trigger, TAS58xx filter-design and filter-peak code with the host C compiler, using small mocks where needed, and run in CI's `format-check` job. The TAS5805M suite also uses Node.js to check the actual EQ page and driver/UI round trips, and `tests/bq_page/run.py` lifts the filter code out of `data/www/bq.html` and checks the page draws exactly what the firmware designs. There is no test framework beyond that; everything else needs testing on hardware.
 
 ## Documentation site
 
