@@ -357,7 +357,6 @@ static uint8_t tas58xx_again_reg(void) {
 }
 
 static void (*s_eq_listener)(void);
-static void eq_changed(void);
 /* The software EQ routes the input itself (dac_tas58xx_set_soft_routing()). */
 static bool s_soft_routing[TAS58XX_MAX_DEVICES];
 
