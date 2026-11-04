@@ -1493,7 +1493,7 @@ function pickAb(){
 function loadPower(){
   /* Digital gain is the TAS58xx's; a software EQ build has no such endpoint,
      and asking anyway logs a warning on the device for every page load. */
-  if(softwareEq()){drawPower();showHeadroom();return Promise.resolve();}
+  if(softwareEq())return Promise.resolve();
   return fetch('/api/audio/digital-gain').then(function(r){
     if(!r.ok)return;
     return r.json().then(function(d){gainInfo=d;});
@@ -1587,8 +1587,7 @@ function showPreamp(){
   var e=$('preamp');
   if(!softwareEq()){e.style.display='none';return;}
   $('trim-hint').textContent='The volume at the top of the page is the'+
-    ' AirPlay volume. The levels below trim each output against it to match'+
-    ' drivers.';
+    ' AirPlay volume. The levels below trim each output against it to match drivers.';
   var chains=activeChains(),pk={db:-Infinity,f:0},k,r;
   for(k=0;k<chains.length;k++){
     r=chainPeak(sectionsOf(chains[k].c,chains[k].rate),chains[k].rate,

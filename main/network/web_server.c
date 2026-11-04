@@ -43,10 +43,6 @@
 #include "dac_tas58xx.h"
 #endif
 
-#ifdef CONFIG_HUSB238A
-#include "husb238a.h"
-#endif
-
 #ifdef CONFIG_SOFTWARE_EQ
 #include "audio_eq.h"
 #endif
@@ -59,6 +55,10 @@
  * software. */
 #if defined(CONFIG_DAC_TAS58XX) || defined(CONFIG_SOFTWARE_EQ)
 #define HAS_BQ_API 1
+#endif
+
+#ifdef CONFIG_HUSB238A
+#include "husb238a.h"
 #endif
 
 #ifdef CONFIG_DAC_TAS57XX
@@ -2541,24 +2541,23 @@ static esp_err_t hf_flow_post_handler(httpd_req_t *req) {
 #define EQB_GAIN_MIN_DB TAS58XX_GAIN_MIN_DB
 #define EQB_GAIN_MAX_DB TAS58XX_GAIN_MAX_DB
 #define EQB_MIX_COUNT   TAS58XX_MIX_COUNT
+#define EQB_MIX_STEREO  TAS58XX_MIX_STEREO
 
 static int eqb_devices(void) {
   return dac_tas58xx_get_device_count();
 }
 
 /* Which amplifier a chain belongs to, so the page can label the columns
- * without duplicating the wiring logic: the second amplifier of a dual-DAC
- * board can be bridged, and so can a board's only one. */
+ * without duplicating the dual-DAC wiring logic. */
 static const char *eqb_role(int dev) {
-  return dac_tas58xx_is_pbtl(dev) ? "mono" : "stereo";
+  if (dev == 0) {
+    return dac_tas58xx_get_active_first_pbtl() ? "mono" : "stereo";
+  }
+  return dac_tas58xx_get_active_second_pbtl() ? "mono" : "stereo";
 }
 
 static bool eqb_pbtl(int dev) {
   return dac_tas58xx_is_pbtl(dev);
-}
-/* A TAS5805M cannot route its inputs, so it has only the one routing. */
-static bool eqb_mix_fixed(int dev) {
-  return !dac_tas58xx_can_route(dev);
 }
 static uint32_t eqb_rate(int dev) {
   return dac_tas58xx_bq_device_sample_rate(dev);
@@ -2603,6 +2602,9 @@ static bool eqb_get_mute(int dev, int ch) {
 static int eqb_get_mix(int dev) {
   return (int)dac_tas58xx_get_mix(dev);
 }
+static bool eqb_can_route(int dev) {
+  return dac_tas58xx_can_route(dev);
+}
 
 static void eqb_set_gain(int dev, int ch, float db) {
   dac_tas58xx_set_gain_db(dev, ch, db);
@@ -2645,6 +2647,7 @@ static bool eqb_preamp_db(float *db) {
 #define EQB_GAIN_MIN_DB AUDIO_EQ_TRIM_MIN_DB
 #define EQB_GAIN_MAX_DB AUDIO_EQ_TRIM_MAX_DB
 #define EQB_MIX_COUNT   4
+#define EQB_MIX_STEREO  0
 
 /* The page's input routings, in its order, as output channel modes: the
  * software path already has that mixer, so both controls share it. */
@@ -2663,10 +2666,6 @@ static const char *eqb_role(int dev) {
   return "stereo";
 }
 static bool eqb_pbtl(int dev) {
-  (void)dev;
-  return false;
-}
-static bool eqb_mix_fixed(int dev) {
   (void)dev;
   return false;
 }
@@ -2729,6 +2728,10 @@ static int eqb_get_mix(int dev) {
 static void eqb_set_mix(int dev, int mix) {
   (void)dev;
   audio_output_set_channel_mode(eqb_mix_modes[mix]);
+}
+static bool eqb_can_route(int dev) {
+  (void)dev;
+  return true;
 }
 /* What the software EQ takes off ahead of the filters to fit the boosts. */
 static bool eqb_preamp_db(float *db) {
@@ -2874,7 +2877,8 @@ static esp_err_t bq_get_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(amp, "ganged", eqb_get_ganged(d));
     cJSON_AddNumberToObject(amp, "mix", eqb_get_mix(d));
     cJSON_AddBoolToObject(amp, "pbtl", eqb_pbtl(d));
-    cJSON_AddBoolToObject(amp, "mix_fixed", eqb_mix_fixed(d));
+    /* A TAS5805M cannot route its inputs, so it has only the one routing. */
+    cJSON_AddBoolToObject(amp, "mix_fixed", !eqb_can_route(d));
 
     cJSON *gains = cJSON_AddArrayToObject(amp, "gains");
     cJSON *mutes = cJSON_AddArrayToObject(amp, "mutes");
@@ -3031,8 +3035,7 @@ static esp_err_t bq_post_handler(httpd_req_t *req) {
       httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad 'mix'");
       return ESP_FAIL;
     }
-    /* 0 is the pair straight through, on either backend. */
-    if (mix->valueint != 0 && eqb_mix_fixed(dev)) {
+    if (mix->valueint != EQB_MIX_STEREO && !eqb_can_route(dev)) {
       cJSON_Delete(json);
       httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
                           "This amplifier cannot route its inputs");
@@ -3269,14 +3272,15 @@ esp_err_t web_server_start(uint16_t port) {
   config.max_uri_handlers += 2; // per-channel level get/post
 #endif
 #ifdef CONFIG_DAC_TAS58XX
-  // primary + dual DAC wiring, digital gain get/post, biquad readback
+  // primary + dual DAC wiring and digital gain, get/post each, and the
+  // biquad readback
   config.max_uri_handlers += 7;
-#endif
-#ifdef CONFIG_HUSB238A
-  config.max_uri_handlers += 2; // USB-PD supply get/post
 #endif
 #ifdef HAS_BQ_API
   config.max_uri_handlers += 5; // biquad page + get/post/commit/revert
+#endif
+#ifdef CONFIG_HUSB238A
+  config.max_uri_handlers += 2; // USB-PD supply get/post
 #endif
 #ifdef CONFIG_DAC_TAS57XX
   config.max_uri_handlers += 11; // tuning page + HF1/HF3 get/post/commit/revert
