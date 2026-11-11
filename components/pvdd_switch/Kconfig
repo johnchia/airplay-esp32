@@ -1,0 +1,45 @@
+menu "Amplifier supply switch"
+
+    config PVDD_SWITCH
+        bool "Amplifier supply behind a switch the firmware lets on"
+        depends on DAC_TAS58XX
+        default n
+        help
+            For a board whose USB power-delivery chip negotiates by itself
+            and switches the amplifier's supply, with an enable line from
+            the ESP32 in series (the Loud-EH controller, CYPD3177). The
+            firmware lets the switch on while the chip's fault line says
+            the contract is good, drops it the moment it does not, and
+            measures the supply after the switch for the automatic gain.
+
+            The chip is not talked to: it takes the best offer inside the
+            window its resistors set.
+
+    config PVDD_SWITCH_ENABLE_GPIO
+        int "Enable output (high lets the switch on)"
+        depends on PVDD_SWITCH
+        default 7
+
+    config PVDD_SWITCH_FAULT_GPIO
+        int "Fault input (high: no contract inside the window)"
+        depends on PVDD_SWITCH
+        default 4
+
+    config PVDD_SWITCH_SENSE_GPIO
+        int "Supply sense input (an ADC pin, through a divider)"
+        depends on PVDD_SWITCH
+        default 6
+
+    config PVDD_SWITCH_SENSE_TOP_OHMS
+        int "Sense divider: supply to pin, ohms"
+        depends on PVDD_SWITCH
+        range 1 10000000
+        default 100000
+
+    config PVDD_SWITCH_SENSE_BOTTOM_OHMS
+        int "Sense divider: pin to ground, ohms"
+        depends on PVDD_SWITCH
+        range 1 10000000
+        default 12000
+
+endmenu

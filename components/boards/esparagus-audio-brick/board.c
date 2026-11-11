@@ -31,6 +31,9 @@
 #ifdef CONFIG_HUSB238A
 #include "husb238a.h"
 #endif
+#ifdef CONFIG_PVDD_SWITCH
+#include "pvdd_switch.h"
+#endif
 
 #define ISR_HANDLER_TASK_STACK_SIZE 4096
 #define ISR_HANDLER_TASK_PRIORITY   5
@@ -206,6 +209,17 @@ esp_err_t iot_board_init(void) {
     settings_get_usb_pd_volts(&pd_volts);
   }
   husb238a_init(s_i2c_bus_handle, pd_volts, dac_tas58xx_set_supply_mv);
+#endif
+
+#ifdef CONFIG_PVDD_SWITCH
+  /* Let the amplifier's supply on, if the charger has agreed one, before
+   * the amplifier comes up; the driver hears the measured supply now and
+   * whenever it changes. Without it the amplifier still answers on I2C, so
+   * a failure here is not the board's. */
+  err = pvdd_switch_init(dac_tas58xx_set_supply_mv);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Amplifier supply switch: %s", esp_err_to_name(err));
+  }
 #endif
 
   err = dac_init(s_i2c_bus_handle);

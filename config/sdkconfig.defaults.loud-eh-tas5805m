@@ -1,0 +1,42 @@
+# Loud-EH defaults: the two-board Louder Mini rework (ESP32-S3-WROOM-1U-N8R8
+# controller with a CYPD3177, and a two-channel TAS5805M amp board).
+# The I2S, I2C and PDN pins are the Louder-ESP32-S3's. Both outputs are
+# separate (BTL), so nothing is bridged here; an amp board with its PBTL
+# links soldered needs CONFIG_TAS58XX_FORCE_PBTL as well.
+CONFIG_BOARD_LOUDER_ESP32_S3=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_SPIRAM_MODE_OCT=y
+
+CONFIG_DAC_TAS58XX=y
+CONFIG_DAC_CONTROLS_VOLUME=y
+
+# The CYPD3177 negotiates by itself, inside the window its resistors set
+# (9-20 V), and is not talked to. The firmware lets the amplifier's supply
+# on while the chip's fault line (IO4) is low, through the enable on IO7,
+# and measures the supply after the switch on IO6 (100 k / 12 k).
+CONFIG_PVDD_SWITCH=y
+CONFIG_PVDD_SWITCH_ENABLE_GPIO=7
+CONFIG_PVDD_SWITCH_FAULT_GPIO=4
+CONFIG_PVDD_SWITCH_SENSE_GPIO=6
+CONFIG_PVDD_SWITCH_SENSE_TOP_OHMS=100000
+CONFIG_PVDD_SWITCH_SENSE_BOTTOM_OHMS=12000
+# Until a supply is measured the amplifier has none, so the analog gain
+# starts at the bottom.
+CONFIG_TAS58XX_ANALOG_GAIN_UNKNOWN_SUPPLY=-16
+
+# GPIO config
+CONFIG_I2S_SCK_IO=-1
+CONFIG_I2S_BCK_IO=14
+CONFIG_I2S_WS_IO=15
+CONFIG_I2S_DO_IO=16
+CONFIG_DAC_I2C_SDA=8
+CONFIG_DAC_I2C_SCL=9
+CONFIG_DAC_PDN_GPIO=17
+
+# ESP-IDF applies config/sdkconfig.defaults.esp32s3 after the base defaults,
+# and that layer is the generic S3 board's: an RGB LED on GPIO48 and a DAC
+# module grounded through GPIO14, which here is BCK. Neither is fitted, and
+# GPIO48 is the CYPD3177's interrupt line.
+CONFIG_LED_RGB_GPIO=-1
+CONFIG_I2S_GND_IO=-1
