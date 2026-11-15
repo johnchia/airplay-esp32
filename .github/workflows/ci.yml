@@ -119,7 +119,7 @@ jobs:
       - name: Run clang-tidy
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: esp32s3
           command: scripts/lint.sh
 
@@ -151,7 +151,7 @@ jobs:
       - name: Build ${{ matrix.name }} output backend
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: ${{ matrix.target }}
           command: idf.py -DSDKCONFIG_DEFAULTS="${{ matrix.sdkconfig }}" build
 
@@ -171,7 +171,8 @@ jobs:
   # the whole workflow into a single pass/fail, treating skipped as fine.
   ci-gate:
     if: always()
-    needs: [changes, format-check, lint-check, output-backends, build]
+    needs:
+      [changes, format-check, lint-check, output-backends, build]
     runs-on: ubuntu-latest
     steps:
       - name: Check upstream results
