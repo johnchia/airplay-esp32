@@ -127,6 +127,16 @@ bool dac_tas58xx_get_analog_auto(void);
  * Safe before dac_init(), and from the USB-PD trigger's supply callback.
  */
 void dac_tas58xx_set_supply_mv(int supply_mv);
+
+/**
+ * Look for the amplifiers again and set them up from scratch, then put them
+ * in the power mode and at the volume last asked for. For a board whose
+ * amplifier supply can arrive after dac_init(), or go away and come back:
+ * without its supply a TAS58xx does not answer on I2C and loses its
+ * registers. Needs dac_init() to have run, whether or not it found a chip.
+ * Takes as long as dac_init() does; not for a timing-critical task.
+ */
+esp_err_t dac_tas58xx_reinit(void);
 int dac_tas58xx_get_supply_mv(void);
 
 /**

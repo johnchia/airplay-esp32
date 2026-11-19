@@ -33,6 +33,7 @@
 #endif
 #ifdef CONFIG_PVDD_SWITCH
 #include "pvdd_switch.h"
+#include <stdatomic.h>
 #endif
 
 #define ISR_HANDLER_TASK_STACK_SIZE 4096
@@ -58,6 +59,83 @@ static void on_playback_event(playback_source_t source, playback_event_t event,
                               void *user_data);
 static esp_err_t init_spkfault_gpio(void);
 static esp_err_t init_dac_pdn_gpios(void);
+
+#ifdef CONFIG_PVDD_SWITCH
+/*
+ * The amplifier's supply comes through a switch that the charger's contract
+ * turns on, and without it the amplifier does not answer on I2C. On a PD
+ * charger it is there before dac_init(); on a plain 5 V port it can arrive
+ * seconds later, and a fault takes it away and gives it back. Either way the
+ * amplifier has to be set up when the supply arrives, not only at boot.
+ */
+#define AMP_BRINGUP_TRIES    5
+#define AMP_BRINGUP_RETRY_MS 300
+#define AMP_BRINGUP_STACK    8192
+
+static atomic_bool s_amp_tried;       // dac_init() has run, found or not
+static atomic_bool s_amp_up;          // the amplifier is set up
+static atomic_bool s_amp_supply_lost; // the supply went away since then
+static atomic_bool s_amp_bringup_running;
+
+static void amp_bringup_task(void *arg) {
+  (void)arg;
+  for (;;) {
+    atomic_store(&s_amp_supply_lost, false);
+    esp_err_t err = ESP_FAIL;
+    for (int i = 0; i < AMP_BRINGUP_TRIES && err != ESP_OK; i++) {
+      if (i > 0) {
+        vTaskDelay(pdMS_TO_TICKS(AMP_BRINGUP_RETRY_MS));
+      }
+      // The reset pulse it got at boot was before it had a supply.
+      init_dac_pdn_gpios();
+      err = dac_tas58xx_reinit();
+    }
+    atomic_store(&s_amp_up, err == ESP_OK);
+    if (err == ESP_OK) {
+      ESP_LOGI(TAG, "Amplifier set up after its supply arrived");
+    } else {
+      ESP_LOGE(TAG, "Amplifier has a supply but did not come up: %s",
+               esp_err_to_name(err));
+    }
+
+    // A supply that dropped and came back while this ran needs another go;
+    // on_amp_supply() could not start one.
+    pvdd_switch_status_t status;
+    if (!atomic_load(&s_amp_supply_lost) ||
+        pvdd_switch_get_status(&status) != ESP_OK || status.supply_mv <= 0) {
+      break;
+    }
+  }
+  atomic_store(&s_amp_bringup_running, false);
+  vTaskDelete(NULL);
+}
+
+static void amp_bringup_start(void) {
+  if (atomic_exchange(&s_amp_bringup_running, true)) {
+    return;
+  }
+  if (xTaskCreate(amp_bringup_task, "amp_bringup", AMP_BRINGUP_STACK, NULL, 5,
+                  NULL) != pdPASS) {
+    atomic_store(&s_amp_bringup_running, false);
+    ESP_LOGE(TAG, "Could not start the amplifier bring-up task");
+  }
+}
+
+/* The supply switch's report: the measured supply, or 0 when it is off. */
+static void on_amp_supply(int supply_mv) {
+  dac_tas58xx_set_supply_mv(supply_mv);
+  if (!atomic_load(&s_amp_tried)) {
+    return; // still booting: iot_board_init() sets the amplifier up
+  }
+  if (supply_mv <= 0) {
+    atomic_store(&s_amp_supply_lost, true);
+    return;
+  }
+  if (!atomic_load(&s_amp_up) || atomic_load(&s_amp_supply_lost)) {
+    amp_bringup_start();
+  }
+}
+#endif
 
 const char *iot_board_get_info(void) {
   return BOARD_NAME;
@@ -216,13 +294,21 @@ esp_err_t iot_board_init(void) {
    * the amplifier comes up; the driver hears the measured supply now and
    * whenever it changes. Without it the amplifier still answers on I2C, so
    * a failure here is not the board's. */
-  err = pvdd_switch_init(dac_tas58xx_set_supply_mv);
+  err = pvdd_switch_init(on_amp_supply);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Amplifier supply switch: %s", esp_err_to_name(err));
   }
 #endif
 
   err = dac_init(s_i2c_bus_handle);
+#ifdef CONFIG_PVDD_SWITCH
+  atomic_store(&s_amp_up, err == ESP_OK);
+  if (err == ESP_ERR_NOT_FOUND) {
+    // Not an error yet: on_amp_supply() sets it up when the supply arrives.
+    ESP_LOGW(TAG, "No amplifier on I2C: waiting for its supply");
+    err = ESP_OK;
+  }
+#endif
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Failed to initialize DAC: %s", esp_err_to_name(err));
     return err;
@@ -245,6 +331,17 @@ esp_err_t iot_board_init(void) {
   if (ESP_OK == settings_get_volume(&vol_db)) {
     dac_set_volume(vol_db);
   }
+
+#ifdef CONFIG_PVDD_SWITCH
+  // From here the switch's reports set the amplifier up. One that came
+  // while dac_init() was looking is caught here.
+  atomic_store(&s_amp_tried, true);
+  pvdd_switch_status_t supply;
+  if (!atomic_load(&s_amp_up) && pvdd_switch_get_status(&supply) == ESP_OK &&
+      supply.supply_mv > 0) {
+    amp_bringup_start();
+  }
+#endif
 
   s_board_initialized = true;
   ESP_LOGI(TAG, "Esparagus Brick initialized");

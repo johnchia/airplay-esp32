@@ -396,6 +396,8 @@ static tas58xx_dev_t *s_cur = NULL;
  */
 static SemaphoreHandle_t s_reg_mutex = NULL;
 static uint32_t s_power_mode_generation = 0;
+/* The mode last asked for, which an amplifier set up late has to be put in. */
+static dac_power_mode_t s_requested_mode = DAC_POWER_OFF;
 /* Amplifiers dropped from PLAY to HIZ for an I2S retune, for
  * tas58xx_on_i2s_started() to bring back. */
 static bool s_parked_for_retune[TAS58XX_MAX_DEVICES];
@@ -1761,6 +1763,7 @@ static void set_power_mode_dev(tas58xx_dev_t *dev, dac_power_mode_t mode) {
 static void tas58xx_set_power_mode(dac_power_mode_t mode) {
   REG_LOCK();
   s_power_mode_generation++;
+  s_requested_mode = mode;
   for (int i = 0; i < s_dev_count; i++) {
     /* An explicit mode supersedes a retune's pending restore. */
     s_parked_for_retune[i] = false;
@@ -1933,6 +1936,45 @@ void dac_tas58xx_set_full_volume_db(float db) {
   if (s_reg_mutex != NULL) {
     REG_UNLOCK();
   }
+}
+
+esp_err_t dac_tas58xx_reinit(void) {
+  const i2c_master_bus_handle_t bus = s_bus_handle;
+  if (bus == NULL || s_reg_mutex == NULL) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  /* Forget what was known of the chips: with their supply gone they have
+   * lost every register, and tas58xx_init() adds them to the bus again. */
+  REG_LOCK();
+  s_pvdd_dev = NULL;
+  for (int i = 0; i < s_dev_count; i++) {
+    tas58xx_dev_t *dev = &s_devs[i];
+    free(dev->hf_buf);
+    dev->hf_buf = NULL;
+    dev->hf_size = 0;
+    s_parked_for_retune[i] = false;
+    if (dev->handle != NULL) {
+      board_i2c_remove_device(dev->handle);
+      dev->handle = NULL;
+    }
+  }
+  s_cur = NULL;
+  s_dev_count = 0;
+  REG_UNLOCK();
+
+  const esp_err_t err = tas58xx_init(bus);
+  if (err != ESP_OK) {
+    return err;
+  }
+
+  /* Where the rest of the firmware believes the amplifier already is. */
+  REG_LOCK();
+  tas58xx_apply_volume_locked();
+  s_cur = NULL;
+  REG_UNLOCK();
+  tas58xx_set_power_mode(s_requested_mode);
+  return ESP_OK;
 }
 
 void dac_tas58xx_set_supply_mv(int supply_mv) {
