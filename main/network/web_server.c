@@ -39,6 +39,12 @@
 #include "sendspin.h"
 #endif
 
+#ifdef CONFIG_PVDD_SWITCH
+#include "pvdd_switch.h"
+#endif
+#ifdef CONFIG_USB_AUDIO_SINK
+#include "usb_audio_sink.h"
+#endif
 #ifdef CONFIG_DAC_TAS58XX
 #include "dac_tas58xx.h"
 #endif
@@ -3175,6 +3181,70 @@ static void add_limits(cJSON *amp, int dev) {
   add_coeff(clip, "fine_volume_r", lim.fine_vol[1], 30);
 }
 
+/* What the output stage and its supply are doing right now: each
+ * amplifier's switching frequency, modulation, state and warning bits, the
+ * fault report, the switched supply and its lowest reading since the last
+ * call, and the USB audio counters. Read only. */
+static esp_err_t dac_diag_get_handler(httpd_req_t *req) {
+  static const char *const mods[] = {"bd", "1spw", "hybrid", "?"};
+  static const char *const states[] = {"deep sleep", "sleep", "hi-z", "play"};
+  cJSON *json = cJSON_CreateObject();
+  cJSON *amps = cJSON_AddArrayToObject(json, "amps");
+  for (int d = 0; d < dac_tas58xx_get_device_count(); d++) {
+    tas58xx_diag_t diag;
+    if (dac_tas58xx_diag_get(d, &diag) != ESP_OK) {
+      continue;
+    }
+    cJSON *amp = cJSON_CreateObject();
+    cJSON_AddItemToArray(amps, amp);
+    cJSON_AddNumberToObject(amp, "addr", diag.addr);
+    cJSON_AddStringToObject(amp, "model",
+                            diag.is_tas5825m ? "TAS5825M" : "TAS5805M");
+    cJSON_AddNumberToObject(amp, "ctrl1", diag.ctrl1);
+    cJSON_AddNumberToObject(amp, "fsw_khz", diag.fsw_khz);
+    cJSON_AddStringToObject(amp, "mod", mods[diag.mod & 3]);
+    cJSON_AddStringToObject(amp, "state", states[diag.ctrl2 & 3]);
+    cJSON_AddNumberToObject(amp, "warning", diag.warning);
+  }
+  char faults[160] = "";
+  dac_tas58xx_fault_report(faults, sizeof(faults));
+  cJSON_AddStringToObject(json, "faults", faults);
+#ifdef CONFIG_PVDD_SWITCH
+  pvdd_switch_status_t sw;
+  if (pvdd_switch_get_status(&sw) == ESP_OK) {
+    cJSON *supply = cJSON_AddObjectToObject(json, "supply");
+    cJSON_AddNumberToObject(supply, "sense_mv", sw.sense_mv);
+    cJSON_AddNumberToObject(supply, "min_mv", pvdd_switch_take_min_mv());
+    cJSON_AddBoolToObject(supply, "fault", sw.fault);
+    cJSON_AddBoolToObject(supply, "enabled", sw.enabled);
+  }
+#endif
+#ifdef CONFIG_USB_AUDIO_SINK
+  usb_audio_sink_diag_t usb;
+  usb_audio_sink_get_diag(&usb);
+  cJSON *u = cJSON_AddObjectToObject(json, "usb");
+  cJSON_AddBoolToObject(u, "streaming", usb.streaming);
+  cJSON_AddNumberToObject(u, "host_fps", usb.host_fps);
+  cJSON_AddNumberToObject(u, "ring_filled", usb.ring_filled);
+  cJSON_AddNumberToObject(u, "ring_size", usb.ring_size);
+  cJSON_AddNumberToObject(u, "dropped", usb.dropped);
+  cJSON_AddNumberToObject(u, "underruns", usb.underruns);
+  cJSON_AddNumberToObject(u, "missing_ms", usb.missing_ms);
+  cJSON_AddNumberToObject(u, "gap_max_us", usb.gap_max_us);
+#endif
+  cJSON_AddBoolToObject(json, "success", true);
+  char *out = cJSON_PrintUnformatted(json);
+  cJSON_Delete(json);
+  if (!out) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, out);
+  free(out);
+  return ESP_OK;
+}
+
 /* Each section as designed next to what the part's coefficient RAM holds, so
  * a chain can be checked end to end. A mismatch only means something while
  * the amplifier is playing, which is when the chain is written. */
@@ -3262,7 +3332,7 @@ esp_err_t web_server_start(uint16_t port) {
   // Slots are allocated up front and httpd_register_uri_handler failures are
   // unchecked, so an undercount silently drops whatever registers last, which
   // is log_stream's /ws/logs. Keep these in step with the handlers below.
-  config.max_uri_handlers = 43; // 37 here + /ws/logs, plus 5 spare
+  config.max_uri_handlers = 44; // 38 here + /ws/logs, plus 5 spare
 #ifdef CONFIG_SENDSPIN_ENABLE
   config.max_uri_handlers += 5; // /sendspin + mode get/post + unpair + reset
   // The Sendspin server holds its WebSocket open for as long as the speaker
@@ -3583,6 +3653,10 @@ esp_err_t web_server_start(uint16_t port) {
                                  .method = HTTP_GET,
                                  .handler = bq_readback_handler};
   register_uri(&bq_readback_uri);
+  httpd_uri_t dac_diag_get_uri = {.uri = "/api/dac/diag",
+                                  .method = HTTP_GET,
+                                  .handler = dac_diag_get_handler};
+  register_uri(&dac_diag_get_uri);
 #endif
 #endif
 

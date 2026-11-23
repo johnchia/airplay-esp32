@@ -42,6 +42,8 @@ static atomic_bool s_tripped;
 static atomic_int s_sense_mv;
 static atomic_bool s_enabled;
 static atomic_bool s_fault;
+// DIAGNOSTIC: lowest reading since pvdd_switch_take_min_mv(), -1 = none.
+static atomic_int s_sense_min_mv = -1;
 
 static void IRAM_ATTR fault_isr(void *arg) {
   (void)arg;
@@ -97,6 +99,10 @@ static pvdd_switch_state_t poll_once(uint32_t dt_ms) {
   atomic_store(&s_fault, fault);
   atomic_store(&s_enabled, out.enable);
   atomic_store(&s_sense_mv, sense_mv);
+  const int low = atomic_load(&s_sense_min_mv);
+  if (low < 0 || sense_mv < low) {
+    atomic_store(&s_sense_min_mv, sense_mv);
+  }
 
   if (before != PVDD_SWITCH_OFF && s_logic.state == PVDD_SWITCH_OFF) {
     ESP_LOGW(TAG, "Fault line high: amplifier supply switched off");
@@ -232,6 +238,10 @@ esp_err_t pvdd_switch_init(pvdd_switch_supply_cb_t on_supply) {
   }
   s_ready = true;
   return ESP_OK;
+}
+
+int pvdd_switch_take_min_mv(void) {
+  return atomic_exchange(&s_sense_min_mv, -1);
 }
 
 esp_err_t pvdd_switch_get_status(pvdd_switch_status_t *status) {

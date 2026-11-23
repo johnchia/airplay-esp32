@@ -132,6 +132,7 @@ set( DEPS
     dac_tas57xx
     dac_pcm51xx
     husb238a
+    pvdd_switch
     display
     audio-resampler
     esp_eth

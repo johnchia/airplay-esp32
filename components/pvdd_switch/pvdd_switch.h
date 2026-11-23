@@ -42,4 +42,9 @@ typedef struct {
   int supply_mv; /**< the supply as last reported, 0 = off or unknown */
 } pvdd_switch_status_t;
 
+/** DIAGNOSTIC (not for merging): the lowest supply measured since the last
+ * call, in mV, or -1 if none was taken. A 20 ms average, so a shorter dip
+ * reads shallower than it was. */
+int pvdd_switch_take_min_mv(void);
+
 esp_err_t pvdd_switch_get_status(pvdd_switch_status_t *status);

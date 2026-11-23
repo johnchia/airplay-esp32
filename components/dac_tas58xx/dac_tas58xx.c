@@ -3356,6 +3356,66 @@ static esp_err_t read_coeff32(uint8_t page, uint8_t sub_addr, int32_t *out) {
   return err;
 }
 
+/* ---------- Output stage readback (/api/dac/diag) ---------- */
+
+#define CTRL1_FSW_MASK  0x70
+#define CTRL1_FSW_SHIFT 4
+
+/* FSW_SEL codes differ between the parts (SLASEH7H Table 9-9, SLASEH5D
+ * Table 7-9). -1 for a frequency the part does not have. */
+static int fsw_code(tas58xx_model_t model, int khz) {
+  const bool is25 = model == TAS58XX_MODEL_TAS5825M;
+  switch (khz) {
+  case 384:
+    return is25 ? 0 : 1;
+  case 480:
+    return is25 ? 2 : 3;
+  case 576:
+    return is25 ? 3 : 4;
+  case 768:
+    return is25 ? 4 : 0;
+  default:
+    return -1;
+  }
+}
+
+static int fsw_khz(tas58xx_model_t model, uint8_t ctrl1) {
+  static const int khz[] = {384, 480, 576, 768};
+  const int code = (ctrl1 & CTRL1_FSW_MASK) >> CTRL1_FSW_SHIFT;
+  for (size_t i = 0; i < sizeof(khz) / sizeof(khz[0]); i++) {
+    if (fsw_code(model, khz[i]) == code) {
+      return khz[i];
+    }
+  }
+  return 0;
+}
+
+esp_err_t dac_tas58xx_diag_get(int dev, tas58xx_diag_t *out) {
+  if (!out || dev < 0 || dev >= s_dev_count) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (s_reg_mutex == NULL) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  memset(out, 0, sizeof(*out));
+  REG_LOCK();
+  s_cur = &s_devs[dev];
+  out->addr = s_devs[dev].addr;
+  out->is_tas5825m = s_devs[dev].model == TAS58XX_MODEL_TAS5825M;
+  esp_err_t err = tas58xx_read_reg(REG_DEVICE_CTRL1, &out->ctrl1);
+  if (err == ESP_OK) {
+    err = tas58xx_read_reg(REG_DEVICE_CTRL2, &out->ctrl2);
+  }
+  if (err == ESP_OK) {
+    err = tas58xx_read_reg(REG_WARNING, &out->warning);
+  }
+  out->fsw_khz = fsw_khz(s_devs[dev].model, out->ctrl1);
+  out->mod = out->ctrl1 & CTRL1_DAMP_MOD_MASK;
+  s_cur = NULL;
+  REG_UNLOCK();
+  return err;
+}
+
 esp_err_t dac_tas58xx_limit_readback(int dev, tas58xx_limit_readback_t *out) {
   if (!out || dev < 0 || dev >= s_dev_count) {
     return ESP_ERR_INVALID_ARG;

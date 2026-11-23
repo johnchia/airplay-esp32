@@ -106,6 +106,7 @@ static uint32_t s_dropped;
 static uint32_t s_underruns;
 static _Atomic uint32_t s_rx_bytes;
 static int64_t s_stats_us;
+static uint32_t s_last_fps; // DIAGNOSTIC
 // Audio that never reached uac_output_cb() this stream, and the longest gap
 // between two callbacks since the last stats line.  Written on the
 // component's task, read and reset on the sink task.
@@ -265,6 +266,7 @@ static void log_stats(void) {
   uint32_t bytes = atomic_exchange(&s_rx_bytes, 0);
   uint32_t fps = (uint32_t)((uint64_t)(bytes / BYTES_PER_FRAME) * 1000000U /
                             (uint64_t)elapsed);
+  s_last_fps = fps;
   ESP_LOGD(TAG,
            "host %" PRIu32 " fps (i2s %d) ring %u/%u dropped %" PRIu32
            " underruns %" PRIu32,
@@ -280,6 +282,19 @@ static void log_stats(void) {
              missing_ms - s_missing_logged, gap_us / 1000, gap_us % 1000 / 100);
     s_missing_logged = missing_ms;
   }
+}
+
+void usb_audio_sink_get_diag(usb_audio_sink_diag_t *out) {
+  out->streaming = s_streaming;
+  out->host_fps = s_last_fps;
+  out->ring_filled = s_ringbuf != NULL ? (uint32_t)ringbuf_filled() : 0;
+  out->ring_size = RINGBUF_SIZE;
+  out->dropped = s_dropped;
+  out->underruns = s_underruns;
+  out->missing_ms = atomic_load(&s_missing_ms);
+  const uint32_t pending = atomic_load(&s_gap_max_us);
+  out->gap_max_us =
+      pending > s_stream_gap_max_us ? pending : s_stream_gap_max_us;
 }
 
 static void usb_sink_task(void *arg) {

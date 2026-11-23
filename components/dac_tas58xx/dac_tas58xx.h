@@ -316,3 +316,17 @@ void dac_tas58xx_set_eq_listener(void (*listener)(void));
  * the PBTL setting cannot be changed from the web UI.
  */
 bool dac_tas58xx_is_first_pbtl_forced(void);
+
+/** One amplifier's DEVICE_CTRL1/2 and warning register, decoded. */
+typedef struct {
+  uint8_t addr;
+  bool is_tas5825m;
+  uint8_t ctrl1;
+  uint8_t ctrl2;
+  uint8_t warning;
+  int fsw_khz; /**< switching frequency the register selects, 0 unknown */
+  int mod;     /**< 0 BD, 1 1SPW, 2 Hybrid */
+} tas58xx_diag_t;
+
+/** Read amplifier @p dev's output-stage registers. */
+esp_err_t dac_tas58xx_diag_get(int dev, tas58xx_diag_t *out);
